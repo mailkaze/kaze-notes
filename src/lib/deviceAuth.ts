@@ -134,19 +134,28 @@ async function verify(user: AppUser, reregister: boolean) {
   else await register(user)
 }
 
-let pending: Promise<void> | null = null
+let pending: { promise: Promise<void>; reregister: boolean } | null = null
 
 /**
  * Pide al sistema que verifique al usuario. La primera vez (o con `reregister`) registra este dispositivo,
  * lo que también exige verificarse. Las llamadas que se solapan comparten el mismo aviso.
  */
 export function verifyDeviceUser(user: AppUser, options: { reregister?: boolean } = {}): Promise<void> {
-  pending ??= verify(user, Boolean(options.reregister))
-    .catch((error: unknown) => {
-      throw toDeviceAuthError(error)
-    })
-    .finally(() => {
-      pending = null
-    })
-  return pending
+  const reregister = Boolean(options.reregister)
+  // Volver a registrar durante otra verificación: si esa sale bien ya basta; si falla, se registra después.
+  if (pending && reregister && !pending.reregister) return pending.promise.catch(() => verifyDeviceUser(user, options))
+  if (!pending) {
+    const current = {
+      reregister,
+      promise: verify(user, reregister)
+        .catch((error: unknown) => {
+          throw toDeviceAuthError(error)
+        })
+        .finally(() => {
+          if (pending === current) pending = null
+        }),
+    }
+    pending = current
+  }
+  return pending.promise
 }

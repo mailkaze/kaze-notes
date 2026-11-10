@@ -128,6 +128,41 @@ test('removing the protection shows the note again without verification', async 
   await expect(page.locator('.ProseMirror')).toContainText('recoger paquete')
 })
 
+test('a note protected from another device while it is being edited here locks at once and keeps what was typed', async ({
+  page,
+}) => {
+  const auth = await addDeviceAuthenticator(page)
+  await signIn(page)
+  await newNote(page, 'Compartida', 'texto inicial')
+  await expect.poll(() => storedLocked(page, 'Compartida')).toBe(false)
+  await setVerified(auth, false)
+  // Lo último escrito aún no se ha guardado (el guardado espera a que se deje de escribir).
+  await page.keyboard.type(' y algo más')
+  await page.evaluate(async (title) => {
+    const url = '/src/lib/backend/index.ts'
+    const { backend } = await import(/* @vite-ignore */ url)
+    const db = JSON.parse(localStorage.getItem('kaze:memory-db') ?? '{"notes":{}}')
+    const [id] = Object.entries(db.notes).find(([, n]) => (n as { title: string }).title === title)!
+    await backend.write('local', [{ type: 'setNote', id, data: { locked: true, updatedAt: Date.now() } }])
+  }, 'Compartida')
+
+  await expect(page.getByText('Esta nota está protegida.')).toBeVisible()
+  await expect(page.locator('.ProseMirror')).toHaveCount(0)
+  await expect(page.locator('.note-editor')).not.toContainText('texto inicial')
+  const stored = () =>
+    page.evaluate(() => {
+      const notes = Object.values(JSON.parse(localStorage.getItem('kaze:memory-db') ?? '{"notes":{}}').notes) as {
+        title: string
+        content: string
+        locked?: boolean
+      }[]
+      return notes.filter((n) => n.title.startsWith('Compartida'))
+    })
+  await expect.poll(async () => (await stored()).map((n) => [n.title, n.locked, n.content.includes('y algo más')])).toEqual([
+    ['Compartida', true, true],
+  ])
+})
+
 test('a note is not protected when the device does not verify the user', async ({ page }) => {
   const auth = await addDeviceAuthenticator(page)
   await signIn(page)

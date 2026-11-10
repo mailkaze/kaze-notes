@@ -97,4 +97,23 @@ describe('verifyDeviceUser', () => {
     await Promise.all([verifyDeviceUser(user), verifyDeviceUser(user)])
     expect(create).toHaveBeenCalledTimes(1)
   })
+
+  it('registers the device again when asked during a verification that then fails', async () => {
+    await verifyDeviceUser(user)
+    let fail: (error: unknown) => void = () => {}
+    get.mockReturnValueOnce(new Promise((_, reject) => (fail = reject)))
+    const first = verifyDeviceUser(user).catch((e: unknown) => e)
+    const again = verifyDeviceUser(user, { reregister: true })
+    fail(new DOMException('cancelled', 'NotAllowedError'))
+    await again
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(await first).toBeInstanceOf(DeviceAuthError)
+  })
+
+  it('does not register again when the verification in flight succeeds', async () => {
+    await verifyDeviceUser(user)
+    await Promise.all([verifyDeviceUser(user), verifyDeviceUser(user, { reregister: true })])
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(get).toHaveBeenCalledTimes(1)
+  })
 })
