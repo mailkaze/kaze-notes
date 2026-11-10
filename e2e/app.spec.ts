@@ -784,3 +784,162 @@ test('no horizontal overflow on any window size, light and dark (S17)', async ({
     expect(await overflow(), `notes ${width}x${height}`).toBe(false)
   }
 })
+
+// ---------- Escritura a mano con el Apple Pencil ----------
+
+type Pt = [number, number]
+
+/** Trazo sintético: eventos de puntero (lápiz por defecto) sobre el elemento que haya en cada punto. */
+async function stroke(page: Page, points: Pt[], pointerType = 'pen') {
+  await page.evaluate(
+    ({ points, pointerType }) => {
+      const fire = (type: string, [x, y]: [number, number]) => {
+        const target = document.elementFromPoint(x, y) ?? document.body
+        const down = type !== 'pointerup'
+        target.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            pointerId: 7,
+            pointerType,
+            isPrimary: true,
+            clientX: x,
+            clientY: y,
+            pressure: down ? 0.6 : 0,
+            buttons: down ? 1 : 0,
+          }),
+        )
+      }
+      fire('pointerdown', points[0])
+      for (const p of points.slice(1)) fire('pointermove', p)
+      fire('pointerup', points[points.length - 1])
+    },
+    { points, pointerType },
+  )
+}
+
+/** Zigzag de `n` puntos que empieza en (x, y) y baja como mucho 14 px. */
+function scribble(x: number, y: number, n = 12): Pt[] {
+  return Array.from({ length: n }, (_, i): Pt => [x + i * 12, y + (i % 2) * 14])
+}
+
+type StoredInk = { strokes: number[][]; height: number }
+
+async function storedInk(page: Page, title: string): Promise<StoredInk[]> {
+  const note = (await storedNotes(page)).find((n) => n.title === title)
+  const doc = JSON.parse(note?.content || '{}') as { content?: { type: string; attrs: StoredInk }[] }
+  return (doc.content ?? []).filter((n) => n.type === 'ink').map((n) => n.attrs)
+}
+
+test('writing with the pencil below the text creates a handwriting block right there and saves it; taps, fingers and the mouse do not', async ({
+  page,
+}) => {
+  await newNote(page, 'Tinta', 'Hola')
+  const para = (await page.locator('.ProseMirror p').first().boundingBox())!
+  const x = para.x + 40
+  const y = para.y + para.height + 160
+  // Un toque sin mover el lápiz no crea nada, y el dedo desplaza la nota en vez de escribir.
+  await stroke(page, [[x, y]])
+  await stroke(page, scribble(x, y), 'touch')
+  await expect(page.locator('.ink-block')).toHaveCount(0)
+
+  await stroke(page, scribble(x, y))
+  const block = page.locator('.ink-block')
+  await expect(block).toHaveCount(1)
+  // El bloque cubre el sitio donde se escribió.
+  const box = (await block.boundingBox())!
+  expect(box.y).toBeLessThan(y)
+  expect(box.y + box.height).toBeGreaterThan(y + 14)
+  await expect.poll(async () => (await storedInk(page, 'Tinta')).map((i) => i.strokes.length)).toEqual([1])
+  expect((await storedInk(page, 'Tinta'))[0].strokes[0]).toHaveLength(12 * 3)
+
+  // Con el ratón se sigue escribiendo texto.
+  await page.locator('.ProseMirror p').first().click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' mundo')
+  await expect(page.locator('.ProseMirror p').first()).toHaveText('Hola mundo')
+  await expect(block).toHaveCount(1)
+})
+
+test('more pencil strokes go to the same block, which grows near its bottom; undo removes a new block in one go and later strokes one by one', async ({
+  page,
+}) => {
+  await newNote(page, 'Trazos', 'Hola')
+  const para = (await page.locator('.ProseMirror p').first().boundingBox())!
+  // Tras escribir con el lápiz, un clic en el texto devuelve el foco para deshacer con el teclado.
+  const undo = async () => {
+    await page.locator('.ProseMirror p').first().click()
+    await page.keyboard.press(`${mod}+z`)
+  }
+  const block = page.locator('.ink-block')
+
+  await stroke(page, scribble(para.x + 40, para.y + para.height + 40))
+  await expect(block).toHaveCount(1)
+  await undo()
+  await expect(block).toHaveCount(0)
+  await expect(page.locator('.ProseMirror p').first()).toHaveText('Hola')
+
+  await stroke(page, scribble(para.x + 40, para.y + para.height + 40))
+  await expect(block).toHaveCount(1)
+  const first = (await block.boundingBox())!
+  await stroke(page, scribble(first.x + 300, first.y + first.height - 20))
+  await expect(block).toHaveCount(1)
+  await expect.poll(async () => (await storedInk(page, 'Trazos')).map((i) => i.strokes.length)).toEqual([2])
+  expect((await block.boundingBox())!.height).toBeGreaterThan(first.height)
+
+  await undo()
+  await expect.poll(async () => (await storedInk(page, 'Trazos')).map((i) => i.strokes.length)).toEqual([1])
+  await expect(block).toHaveCount(1)
+})
+
+test('an untitled note with only handwriting is kept when leaving it', async ({ page }) => {
+  await newNote(page, '')
+  const box = (await page.locator('.ProseMirror').boundingBox())!
+  await stroke(page, scribble(box.x + 40, box.y + 60))
+  await expect(page.locator('.ink-block')).toHaveCount(1)
+  await expect.poll(async () => (await storedInk(page, '')).map((i) => i.strokes.length)).toEqual([1])
+  await backToNotes(page)
+  expect((await storedInk(page, '')).map((i) => i.strokes.length)).toEqual([1])
+})
+
+test('while the pencil writes the note is not editable, so iPad Scribble cannot turn strokes into text; a finger or the mouse makes it editable again', async ({
+  page,
+}) => {
+  await newNote(page, 'Scribble', 'Hola')
+  const body = page.locator('.ProseMirror')
+  const para = (await page.locator('.ProseMirror p').first().boundingBox())!
+  const onText: Pt = [para.x + 10, para.y + para.height / 2]
+  const editorFocused = () => page.evaluate(() => Boolean(document.activeElement?.closest('.ProseMirror')))
+  expect(await editorFocused()).toBe(true)
+
+  await stroke(page, scribble(para.x + 40, para.y + para.height + 60))
+  await expect(body).toHaveAttribute('contenteditable', 'false')
+  expect(await editorFocused()).toBe(false)
+  // El segundo trazo sigue siendo tinta, en el mismo bloque.
+  const block = (await page.locator('.ink-block').boundingBox())!
+  await stroke(page, scribble(block.x + 200, block.y + 30))
+  await expect.poll(async () => (await storedInk(page, 'Scribble')).map((i) => i.strokes.length)).toEqual([2])
+  await expect(body).toHaveAttribute('contenteditable', 'false')
+
+  // Un toque con el dedo la vuelve editable.
+  await stroke(page, [onText], 'touch')
+  await expect(body).toHaveAttribute('contenteditable', 'true')
+  // El lápiz flotando encima (iPad con hover) la deja lista para escribir antes de tocar la pantalla.
+  await page.evaluate(
+    ([x, y]) =>
+      document
+        .elementFromPoint(x, y)
+        ?.dispatchEvent(
+          new PointerEvent('pointermove', { bubbles: true, pointerType: 'pen', pointerId: 8, clientX: x, clientY: y, buttons: 0 }),
+        ),
+    onText,
+  )
+  await expect(body).toHaveAttribute('contenteditable', 'false')
+  // Con el ratón se vuelve a escribir texto.
+  await page.locator('.ProseMirror p').first().click()
+  await expect(body).toHaveAttribute('contenteditable', 'true')
+  await page.keyboard.press('End')
+  await page.keyboard.type(' mundo')
+  await expect(page.locator('.ProseMirror p').first()).toHaveText('Hola mundo')
+})

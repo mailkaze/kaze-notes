@@ -45,6 +45,10 @@ Recommended: in Google Cloud Console → *APIs & Services → Credentials*, rest
 | `npm run test:e2e` | End-to-end tests (Playwright, in-browser backend) |
 | `OWNER_EMAIL=… npm run rules:deploy` | Generate the security rules for the allowed account(s) and deploy them |
 
+## Handwriting
+
+On an iPad, write with the Apple Pencil anywhere in a note: a handwriting area appears where the pencil lands and grows as you write near its bottom. Your finger scrolls and edits text as usual. While the pencil is in use the note is not editable, so iPadOS Scribble cannot turn the strokes into text; a tap with your finger makes it editable again. Strokes are saved inside the note as vector points, so they scale with the note's width.
+
 ## WhatsApp compatibility
 
 Copying from a note puts WhatsApp syntax on the clipboard: `*bold*`, `_italic_`, `~strike~`, `- ` bullets and `☐` / `☑` checkboxes. Pasting WhatsApp text (with those markers) restores the formatting. WhatsApp has no underline, so underline stays inside the app only.

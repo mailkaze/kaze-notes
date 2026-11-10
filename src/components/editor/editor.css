@@ -755,3 +755,22 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Escritura a mano: sin marco y del ancho del texto. El lápiz escribe y el dedo desplaza la nota. */
+.note-body .ink-block {
+  margin: 0.2em 0;
+  color: var(--text);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.note-body .ink-block canvas {
+  display: block;
+  width: 100%;
+}
+
+.note-body .ink-block.ProseMirror-selectednode {
+  border-radius: 6px;
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}

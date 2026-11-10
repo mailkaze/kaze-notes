@@ -12,6 +12,7 @@ import { t } from '../../lib/i18n'
 import { docToWhatsApp, hasFormattingHtml, looksLikeWhatsApp, whatsAppToHtml } from '../../lib/whatsapp'
 import { Attachment } from './attachment'
 import { EmojiSuggestion, type EmojiMenuController } from './EmojiMenu'
+import { Ink } from './ink'
 import { ReorderableTaskItem } from './taskItem'
 
 /**
@@ -139,6 +140,7 @@ export function createExtensions({ emoji, reorderableTasks = false }: EditorExte
       },
     }),
     Attachment,
+    Ink,
     Placeholder.configure({ placeholder: t('Write something…', 'Escribe algo…') }),
     WhatsAppClipboard,
     ...(emoji ? [EmojiSuggestion.configure({ controller: emoji })] : []),

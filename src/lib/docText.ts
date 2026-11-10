@@ -37,6 +37,9 @@ export function docToLines(doc: JSONContent | null): string[] {
         }
       } else if (node.type === 'paragraph') {
         push(indent, indent, inlineText(node))
+      } else if (node.type === 'ink') {
+        // La escritura a mano cuenta como contenido (si no, la nota sin título se borraría al salir).
+        if (Array.isArray(node.attrs?.strokes) && node.attrs.strokes.length) push(indent, indent, '✏️')
       } else if (node.content) {
         walk(node.content, indent)
       }
