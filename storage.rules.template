@@ -2,11 +2,11 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // App personal: solo la cuenta propietaria puede entrar, y únicamente a sus adjuntos.
+    // Solo entran las cuentas permitidas, y cada una únicamente a sus adjuntos.
     function isOwner(uid) {
       return request.auth != null
         && request.auth.uid == uid
-        && request.auth.token.email == '__OWNER_EMAIL__'
+        && request.auth.token.email in [__OWNER_EMAILS__]
         && request.auth.token.email_verified == true;
     }
 

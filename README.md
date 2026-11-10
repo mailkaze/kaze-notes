@@ -30,7 +30,7 @@ OWNER_EMAIL=you@gmail.com npm run rules:deploy    # rules
 npm run build && firebase deploy --only hosting   # app → https://<project-id>.web.app
 ```
 
-The rules are generated from `firestore.rules.template` and `storage.rules.template` with `OWNER_EMAIL` (the generated `firestore.rules` / `storage.rules` are git-ignored). Only that Google account, with a verified email, can read and write its own data under `users/{uid}`, with a 100 MB limit per attachment. Any other account can sign in but gets permission errors. Attachments are displayed through Firebase download URLs, which carry an unguessable token: anyone who gets one of those URLs can open that file.
+The rules are generated from `firestore.rules.template` and `storage.rules.template` with `OWNER_EMAIL` (the generated `firestore.rules` / `storage.rules` are git-ignored). To let more people use the app, list every account comma-separated, e.g. `OWNER_EMAIL=you@gmail.com,friend@gmail.com`; each deploy replaces the previous list, so always pass all of them. Only those Google accounts, with a verified email, can read and write their own data under `users/{uid}` (nobody sees anyone else's notes), with a 100 MB limit per attachment. Any other account can sign in but gets permission errors. Attachments are displayed through Firebase download URLs, which carry an unguessable token: anyone who gets one of those URLs can open that file.
 
 Recommended: in Google Cloud Console → *APIs & Services → Credentials*, restrict the browser API key to your app's domains.
 
@@ -43,7 +43,7 @@ Recommended: in Google Cloud Console → *APIs & Services → Credentials*, rest
 | `npm run build` | Type-check and production build into `dist/` |
 | `npm test` | Unit tests (Vitest) |
 | `npm run test:e2e` | End-to-end tests (Playwright, in-browser backend) |
-| `OWNER_EMAIL=… npm run rules:deploy` | Generate the security rules for your account and deploy them |
+| `OWNER_EMAIL=… npm run rules:deploy` | Generate the security rules for the allowed account(s) and deploy them |
 
 ## WhatsApp compatibility
 
