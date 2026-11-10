@@ -552,7 +552,7 @@ test('pin, trash, restore, delete forever and empty trash (S13, S14, S22)', asyn
   await expect(page.getByTestId('trash-item')).toHaveCount(1)
   await page.getByRole('button', { name: 'Restaurar' }).click()
   await expect(page.getByTestId('trash-item')).toHaveCount(0)
-  expect((await storedNotes(page)).find((n) => n.title === 'Borrable')?.trashed).toBe(false)
+  await expect.poll(async () => (await storedNotes(page)).find((n) => n.title === 'Borrable')?.trashed).toBe(false)
 
   await page.getByTestId('tree-note').filter({ hasText: 'Borrable' }).click()
   await page.getByRole('button', { name: 'Mover a la papelera' }).first().click()
