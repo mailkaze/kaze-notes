@@ -1,12 +1,12 @@
 import type { DraggableSyntheticListeners } from '@dnd-kit/core'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { FingerprintPattern, Folder as FolderIcon, Pin, Trash } from 'lucide-react'
+import { FingerprintPattern, Folder as FolderIcon, Pin } from 'lucide-react'
 import type { CSSProperties, Ref } from 'react'
 import { noteBg } from '../../lib/colors'
 import { t } from '../../lib/i18n'
 import type { LayoutMode, Note } from '../../lib/types'
-import { openNote, setPinned, trashNote } from '../../state/store'
+import { openNote, setPinned } from '../../state/store'
 import { justDragged } from '../sidebar/dnd'
 
 interface NoteCardProps {
@@ -66,16 +66,8 @@ export function NoteCard({ note, layout, path, overlay, dragging, ref, style, dr
           )}
         </span>
       </button>
+      {/* Sin papelera aquí: al desplazar la lista en el móvil se pulsaba sin querer. Se borra desde la nota. */}
       <div className="note-card-actions">
-        <button
-          type="button"
-          className="icon-btn note-card-trash"
-          aria-label={t('Move to trash', 'Mover a la papelera')}
-          title={t('Move to trash', 'Mover a la papelera')}
-          onClick={() => trashNote(note.id)}
-        >
-          <Trash size={15} />
-        </button>
         <button
           type="button"
           className="icon-btn note-card-pin"

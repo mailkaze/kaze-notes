@@ -1,7 +1,7 @@
 import { DndContext, DragOverlay, type DragEndEvent } from '@dnd-kit/core'
 import { rectSortingStrategy, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { Folder as FolderIcon, FolderOpen, LayoutGrid, List, Search, SquarePen, StickyNote, X } from 'lucide-react'
-import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { t } from '../../lib/i18n'
 import { searchNotes } from '../../lib/search'
@@ -237,7 +237,15 @@ function FolderChips({ folders }: { folders: Folder[] }) {
   )
 }
 
+// Scroll de la última lista vista: al volver de una nota se recupera si es la misma carpeta.
+let lastScroll: { folderId: string | null; top: number } | null = null
+
 export function NotesScreen({ folderId }: { folderId: string | null }) {
+  const bodyRef = useRef<HTMLDivElement>(null)
+  // Solo al montar: es cuando se vuelve de una nota (la pantalla se desmonta al abrirla).
+  useLayoutEffect(() => {
+    if (bodyRef.current && lastScroll?.folderId === folderId) bodyRef.current.scrollTop = lastScroll.top
+  }, [])
   const notes = useApp((s) => s.notes)
   const folders = useApp((s) => s.folders)
   const layout = useApp((s) => s.layout)
@@ -362,7 +370,13 @@ export function NotesScreen({ folderId }: { folderId: string | null }) {
           <SyncIndicator compact={narrow} />
         </div>
       </header>
-      <div className="screen-body notes-body">
+      <div
+        ref={bodyRef}
+        className="screen-body notes-body"
+        onScroll={(e) => {
+          lastScroll = { folderId, top: e.currentTarget.scrollTop }
+        }}
+      >
         <div className="notes-content" data-layout={layout}>
           {body}
         </div>

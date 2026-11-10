@@ -563,6 +563,36 @@ test('pin, trash, restore, delete forever and empty trash (S13, S14, S22)', asyn
   expect((await storedNotes(page)).map((n) => n.title)).toEqual(['Importante'])
 })
 
+test('note cards have no trash button, so scrolling the notes screen cannot trash a note by mistake', async ({ page }) => {
+  await newNote(page, 'Segura', 'x')
+  await backToNotes(page)
+  const segura = page.getByTestId('note-card').filter({ hasText: 'Segura' })
+  await expect(segura.getByRole('button', { name: 'Fijar' })).toHaveCount(1)
+  await expect(segura.getByRole('button', { name: 'Mover a la papelera' })).toHaveCount(0)
+})
+
+test('going back from a note with the back arrow keeps the notes screen scrolled where it was', async ({ page }) => {
+  await page.evaluate(async () => {
+    const url = '/src/state/store.ts'
+    const store = await import(/* @vite-ignore */ url)
+    for (let i = 0; i < 40; i++) {
+      const id = store.createNote(null, false)
+      store.updateNote(id, { title: `Nota ${i}`, content: '', preview: 'texto' })
+    }
+  })
+  const body = page.locator('.notes-body')
+  const target = page.getByTestId('note-card').filter({ has: page.getByText('Nota 3', { exact: true }) })
+  await target.scrollIntoViewIfNeeded()
+  const before = await body.evaluate((el) => el.scrollTop)
+  expect(before).toBeGreaterThan(200)
+
+  await target.getByRole('button').first().click()
+  await expect(page.locator('.ProseMirror')).toBeVisible()
+  await backToNotes(page)
+  await expect.poll(() => body.evaluate((el) => el.scrollTop)).toBe(before)
+  await expect(target).toBeInViewport()
+})
+
 test('search ignores accents, case and small typos (S19)', async ({ page }) => {
   await newNote(page, 'Reunión de equipo', 'Presupuesto trimestral')
   await backToNotes(page)
