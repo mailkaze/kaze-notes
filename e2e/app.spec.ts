@@ -616,6 +616,26 @@ const SIZES = [
   [2560, 1200],
 ] as const
 
+test('installing the app has an icon: PNG apple-touch-icon for iOS and manifest icons for Chrome', async ({ page }) => {
+  const pngSize = async (href: string) => {
+    const res = await page.request.get(href)
+    expect(res.status(), href).toBe(200)
+    const bytes = await res.body()
+    // Firma PNG y dimensiones de la cabecera IHDR.
+    expect(bytes.subarray(1, 4).toString(), href).toBe('PNG')
+    return `${bytes.readUInt32BE(16)}x${bytes.readUInt32BE(20)}`
+  }
+  const touchIcon = await page.locator('link[rel="apple-touch-icon"]').getAttribute('href')
+  expect(await pngSize(touchIcon ?? '')).toBe('180x180')
+
+  const manifestHref = await page.locator('link[rel="manifest"]').getAttribute('href')
+  const manifest = await (await page.request.get(manifestHref ?? '')).json()
+  expect(manifest.icons.length).toBeGreaterThan(0)
+  for (const icon of manifest.icons as { src: string; sizes: string }[]) {
+    expect(await pngSize(icon.src)).toBe(icon.sizes)
+  }
+})
+
 test('no horizontal overflow on any window size, light and dark (S17)', async ({ page }) => {
   await newNote(page, 'Una nota con un título bastante largo para comprobar el recorte', 'Texto '.repeat(60))
   const overflow = () =>
