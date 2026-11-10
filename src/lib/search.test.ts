@@ -107,4 +107,16 @@ describe('searchNotes', () => {
   it('returns nothing for an empty query', () => {
     expect(searchNotes(all, '   ')).toEqual([])
   })
+
+  it('matches only the title of a locked note, never its content', () => {
+    const secret = { ...note('Claves del banco', 'pin 4321 tarjeta'), locked: true }
+    expect(ids(searchNotes([secret], 'tarjeta'))).toEqual([])
+    expect(ids(searchNotes([secret], 'banco'))).toEqual([secret.id])
+  })
+
+  it('stops matching the content once a note is locked', () => {
+    const plain = note('Recados', 'recoger paquete')
+    expect(ids(searchNotes([plain], 'paquete'))).toEqual([plain.id])
+    expect(ids(searchNotes([{ ...plain, locked: true }], 'paquete'))).toEqual([])
+  })
 })

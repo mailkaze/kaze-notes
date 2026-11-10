@@ -24,6 +24,8 @@ export interface Note {
   /** Clave de índice fraccional: orden global de las notas (ascendente). */
   order: string
   pinned: boolean
+  /** Protegida: para verla hay que verificarse en el dispositivo (huella, Face ID, PIN…). Opcional en notas antiguas. */
+  locked?: boolean
   color: NoteColorId | null
   trashed: boolean
   trashedAt: number | null

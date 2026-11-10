@@ -53,10 +53,16 @@ On an iPad, write with the Apple Pencil anywhere in a note: a handwriting area a
 
 Copying from a note puts WhatsApp syntax on the clipboard: `*bold*`, `_italic_`, `~strike~`, `- ` bullets and `☐` / `☑` checkboxes. Pasting WhatsApp text (with those markers) restores the formatting. WhatsApp has no underline, so underline stays inside the app only.
 
+## Protected notes
+
+The fingerprint button in a note's header protects it. A protected note shows only its title in lists, the sidebar and the trash. Search matches only its title. Opening it asks the device to verify you (fingerprint, Face ID, pattern or PIN) through WebAuthn with the device's own authenticator. Each device is registered the first time it verifies you. The note locks again when you leave it.
+
+This only locks the interface. The content is still stored unencrypted in Firestore and in the browser's offline cache, so it does not protect against someone who has access to your account or to the device's browser data.
+
 ## Data model
 
 - `users/{uid}/folders/{id}` — `name`, `parentId`, `order`
-- `users/{uid}/notes/{id}` — `title`, `content` (TipTap JSON string), `preview`, `folderId`, `order`, `pinned`, `color`, `trashed`, `trashedAt`
+- `users/{uid}/notes/{id}` — `title`, `content` (TipTap JSON string), `preview`, `folderId`, `order`, `pinned`, `locked`, `color`, `trashed`, `trashedAt`
 - Storage: `users/{uid}/notes/{noteId}/{timestamp}-{file}`
 
 `order` fields are fractional-index keys, so reordering only rewrites the moved item.

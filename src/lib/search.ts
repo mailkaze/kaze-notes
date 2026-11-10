@@ -17,11 +17,12 @@ interface Indexed {
 const cache = new Map<string, Indexed>()
 
 function index(note: Note): Indexed {
-  const key = `${note.updatedAt}:${note.title.length}:${note.content.length}`
+  const key = `${note.updatedAt}:${note.title.length}:${note.content.length}:${Boolean(note.locked)}`
   const hit = cache.get(note.id)
   if (hit && hit.key === key) return hit
   const title = normalize(note.title)
-  const body = normalize(plainText(note.content))
+  // De las notas protegidas solo se busca en el título.
+  const body = note.locked ? '' : normalize(plainText(note.content))
   const words = `${title} ${body}`.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1)
   const entry = { key, title, body, words: [...new Set(words)] }
   cache.set(note.id, entry)

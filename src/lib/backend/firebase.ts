@@ -50,6 +50,7 @@ function toNote(id: string, d: DocumentData): Note {
     folderId: typeof d.folderId === 'string' ? d.folderId : null,
     order: typeof d.order === 'string' ? d.order : 'a0',
     pinned: d.pinned === true,
+    locked: d.locked === true,
     color: typeof d.color === 'string' ? (d.color as NoteColorId) : null,
     trashed: d.trashed === true,
     trashedAt: typeof d.trashedAt === 'number' ? d.trashedAt : null,

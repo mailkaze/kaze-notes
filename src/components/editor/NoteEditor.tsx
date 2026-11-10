@@ -18,6 +18,7 @@ import { insertFiles, registerLiveEditor } from './attachment'
 import { EmojiMenu, EmojiMenuController, emojiSuggestionKey } from './EmojiMenu'
 import { createExtensions } from './extensions'
 import { FormatToolbar } from './FormatToolbar'
+import { LockedNote } from './LockedNote'
 import { NoteHeader } from './NoteHeader'
 import './editor.css'
 
@@ -48,7 +49,10 @@ function applyRemoteContent(editor: Editor, content: string) {
 
 export function NoteEditor({ noteId }: { noteId: string }) {
   const exists = useApp((s) => Boolean(s.notes[noteId]))
-  return exists ? <EditorScreen noteId={noteId} /> : null
+  // Una nota protegida no monta el editor (ni su contenido) hasta desbloquearla.
+  const locked = useApp((s) => Boolean(s.notes[noteId]?.locked) && s.unlockedNoteId !== noteId)
+  if (!exists) return null
+  return locked ? <LockedNote noteId={noteId} /> : <EditorScreen noteId={noteId} />
 }
 
 function EditorScreen({ noteId }: { noteId: string }) {

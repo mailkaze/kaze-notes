@@ -2,6 +2,7 @@ import type { JSONContent } from '@tiptap/react'
 import { create } from 'zustand'
 import { backend } from '../lib/backend'
 import type { SnapshotMeta, UploadResult, WriteOp } from '../lib/backend'
+import { verifyDeviceUser } from '../lib/deviceAuth'
 import { hasContent, parseContent, previewFromDoc } from '../lib/docText'
 import { t } from '../lib/i18n'
 import { keyBetween } from '../lib/order'
@@ -42,6 +43,8 @@ export interface AppState {
   sidebarWidth: number
   theme: ThemePref
   search: string
+  /** Nota protegida desbloqueada mientras está abierta (se vuelve a bloquear al salir de ella). */
+  unlockedNoteId: string | null
   sync: SyncState
 }
 
@@ -88,6 +91,7 @@ export const useApp = create<AppState>(() => ({
   sidebarWidth: readPref('sidebarWidth', 290),
   theme: readTheme(),
   search: '',
+  unlockedNoteId: null,
   sync: {
     online: typeof navigator === 'undefined' ? true : navigator.onLine,
     serverPending: false,
@@ -201,6 +205,7 @@ function sameNote(a: Note, b: Note) {
     a.order === b.order &&
     a.folderId === b.folderId &&
     a.pinned === b.pinned &&
+    a.locked === b.locked &&
     a.color === b.color &&
     a.trashed === b.trashed &&
     a.title === b.title &&
@@ -260,6 +265,7 @@ export function initApp() {
       dataReady: false,
       notes: {},
       folders: {},
+      unlockedNoteId: null,
       sync: { ...s.sync, error: null, listenerError: null, tooLarge: [] },
     }))
     if (!user) return
@@ -329,6 +335,7 @@ function leaveCurrentNote() {
   const { view } = get()
   if (view.kind !== 'note') return
   flushAll()
+  set({ unlockedNoteId: null })
   const note = get().notes[view.noteId]
   if (note && !note.trashed && !note.title.trim() && !hasContent(parseContent(note.content))) {
     // También se borran los ficheros que subió y ya no usa (p. ej. un adjunto quitado con retroceso).
@@ -419,6 +426,7 @@ export function createNote(folderId: string | null = get().lastFolderId, open = 
         folderId: folderId && get().folders[folderId] ? folderId : null,
         order: keyBetween(null, first?.order),
         pinned: false,
+        locked: false,
         color: null,
         trashed: false,
         trashedAt: null,
@@ -475,6 +483,8 @@ export function createConflictCopy(id: string, version: Pick<Note, 'title' | 'co
         folderId: note.folderId,
         order: keyBetween(note.order, next?.order),
         pinned: false,
+        // La copia de una nota protegida también lo está.
+        locked: Boolean(note.locked),
         color: note.color,
         trashed: false,
         trashedAt: null,
@@ -504,11 +514,42 @@ export function setColor(id: string, color: NoteColorId | null) {
   commit([{ type: 'setNote', id, data: { color } }])
 }
 
+const isViewing = (id: string) => {
+  const { view } = get()
+  return view.kind === 'note' && view.noteId === id
+}
+
+/** Desbloquea una nota protegida mientras siga abierta. Lanza DeviceAuthError si no se verifica al usuario. */
+export async function unlockNote(id: string, options: { reregister?: boolean } = {}) {
+  const { user } = get()
+  if (!user) return
+  await verifyDeviceUser(user, options)
+  // Si se ha salido de la nota durante la verificación, sigue bloqueada.
+  if (isViewing(id)) set({ unlockedNoteId: id })
+}
+
+/**
+ * Protege una nota. Antes se verifica al usuario (y se registra el dispositivo si hace falta) para no bloquear
+ * una nota que luego no se pueda abrir aquí. Lanza DeviceAuthError si no se verifica.
+ */
+export async function lockNote(id: string) {
+  const { user } = get()
+  if (!user) return
+  await verifyDeviceUser(user)
+  commit([{ type: 'setNote', id, data: { locked: true } }])
+  if (isViewing(id)) set({ unlockedNoteId: id })
+}
+
+/** Quita la protección. Solo se ofrece con la nota abierta, es decir, ya desbloqueada. */
+export function removeNoteLock(id: string) {
+  commit([{ type: 'setNote', id, data: { locked: false } }])
+}
+
 export function trashNote(id: string) {
   const { view } = get()
   if (view.kind === 'note' && view.noteId === id) {
     flushAll()
-    set((s) => ({ view: { kind: 'notes', folderId: s.lastFolderId }, fullscreen: false }))
+    set((s) => ({ view: { kind: 'notes', folderId: s.lastFolderId }, fullscreen: false, unlockedNoteId: null }))
   }
   commit([{ type: 'setNote', id, data: { trashed: true, trashedAt: Date.now() } }])
 }

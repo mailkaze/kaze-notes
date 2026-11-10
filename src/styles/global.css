@@ -390,6 +390,20 @@ button {
   background: var(--hover);
 }
 
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Sustituye a la vista previa en las notas protegidas (tarjetas, barra lateral y papelera). */
+.note-locked-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
 /* ---------- Popover y menús ---------- */
 .popover {
   position: fixed;

@@ -1,4 +1,4 @@
-import { RotateCcw, Trash } from 'lucide-react'
+import { FingerprintPattern, RotateCcw, Trash } from 'lucide-react'
 import { useMemo } from 'react'
 import { noteBg } from '../../lib/colors'
 import { isSpanish, t } from '../../lib/i18n'
@@ -52,7 +52,12 @@ function TrashItem({ note }: { note: Note }) {
       {note.color && <span className="trash-swatch" style={{ background: noteBg(note.color) }} aria-hidden />}
       <div className="trash-text">
         {title && <span className="trash-title">{title}</span>}
-        {lines ? (
+        {note.locked ? (
+          <span className="note-locked-badge">
+            <FingerprintPattern size={13} aria-hidden />
+            {t('Protected', 'Protegida')}
+          </span>
+        ) : lines ? (
           <span className="trash-preview">{lines}</span>
         ) : (
           !title && <span className="trash-empty-note">{t('Empty note', 'Nota vacía')}</span>

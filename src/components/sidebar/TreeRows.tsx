@@ -1,5 +1,15 @@
 import { useDraggable, useDroppable } from '@dnd-kit/core'
-import { ChevronRight, Ellipsis, Folder as FolderIcon, FolderOpen, FolderPlus, Pencil, SquarePen, Trash } from 'lucide-react'
+import {
+  ChevronRight,
+  Ellipsis,
+  FingerprintPattern,
+  Folder as FolderIcon,
+  FolderOpen,
+  FolderPlus,
+  Pencil,
+  SquarePen,
+  Trash,
+} from 'lucide-react'
 import { Fragment, useCallback, useRef, useState, type CSSProperties } from 'react'
 import { noteBg } from '../../lib/colors'
 import { t } from '../../lib/i18n'
@@ -83,7 +93,12 @@ export function NoteRow({
     >
       <span className="tree-note-text">
         {title && <span className="tree-note-title">{title}</span>}
-        {lines ? (
+        {note.locked ? (
+          <span className="note-locked-badge">
+            <FingerprintPattern size={13} aria-hidden />
+            {t('Protected', 'Protegida')}
+          </span>
+        ) : lines ? (
           <span className="tree-note-preview">{lines}</span>
         ) : (
           !title && <span className="tree-note-empty">{t('Empty note', 'Nota vacía')}</span>
@@ -309,7 +324,8 @@ export function DragPreview({ item }: { item: DragItem }) {
   const label = useApp((s) => {
     if (item.kind === 'folder') return s.folders[item.id]?.name ?? ''
     const note = s.notes[item.id]
-    return note ? note.title.trim() || previewLines(note.preview, 1) : ''
+    if (!note) return ''
+    return note.title.trim() || (note.locked ? t('Protected', 'Protegida') : previewLines(note.preview, 1))
   })
   const color = useApp((s) => (item.kind === 'note' ? s.notes[item.id]?.color ?? null : null))
   return (

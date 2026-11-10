@@ -1,7 +1,7 @@
 import type { DraggableSyntheticListeners } from '@dnd-kit/core'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Folder as FolderIcon, Pin, Trash } from 'lucide-react'
+import { FingerprintPattern, Folder as FolderIcon, Pin, Trash } from 'lucide-react'
 import type { CSSProperties, Ref } from 'react'
 import { noteBg } from '../../lib/colors'
 import { t } from '../../lib/i18n'
@@ -46,7 +46,12 @@ export function NoteCard({ note, layout, path, overlay, dragging, ref, style, dr
         }}
       >
         {title && <span className="note-card-title">{title}</span>}
-        {preview ? (
+        {note.locked ? (
+          <span className="note-locked-badge">
+            <FingerprintPattern size={14} aria-hidden />
+            {t('Protected', 'Protegida')}
+          </span>
+        ) : preview ? (
           <span className="note-card-preview">{preview}</span>
         ) : (
           !title && <span className="note-card-empty">{t('Empty note', 'Nota vacía')}</span>

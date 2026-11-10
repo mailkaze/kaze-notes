@@ -7,6 +7,8 @@ interface ConfirmRequest {
   message?: string
   confirmLabel?: string
   danger?: boolean
+  /** Solo informa: sin botón de cancelar. */
+  notice?: boolean
   resolve: (ok: boolean) => void
 }
 
@@ -59,9 +61,11 @@ export function ConfirmHost() {
         </h2>
         {request.message && <p className="dialog-message">{request.message}</p>}
         <div className="dialog-actions">
-          <button type="button" className="btn" onClick={() => close(false)}>
-            {t('Cancel', 'Cancelar')}
-          </button>
+          {!request.notice && (
+            <button type="button" className="btn" onClick={() => close(false)}>
+              {t('Cancel', 'Cancelar')}
+            </button>
+          )}
           <button
             ref={confirmRef}
             type="button"

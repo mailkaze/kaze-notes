@@ -3,6 +3,7 @@ import {
   Check,
   ChevronDown,
   Ellipsis,
+  FingerprintPattern,
   Folder as FolderIcon,
   FolderOpen,
   FolderPlus,
@@ -16,20 +17,24 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { NOTE_COLORS, noteBg } from '../../lib/colors'
+import { DeviceAuthError } from '../../lib/deviceAuth'
 import { t } from '../../lib/i18n'
 import { folderPathLabel } from '../../lib/tree'
 import type { Note, NoteColorId } from '../../lib/types'
 import {
   closeNote,
   createFolder,
+  lockNote,
   moveNote,
   openFolder,
+  removeNoteLock,
   setColor,
   setPinned,
   toggleFullscreen,
   trashNote,
   useApp,
 } from '../../state/store'
+import { confirmDialog } from '../ui/confirm'
 import { SidebarToggle } from '../ui/controls'
 import { Popover } from '../ui/Popover'
 import { SyncIndicator } from '../ui/SyncIndicator'
@@ -186,6 +191,24 @@ function FolderPickerPanel({ note, onClose }: { note: Note; onClose: () => void 
   )
 }
 
+/** Protege la nota (verificando antes al usuario) o le quita la protección. */
+async function toggleLock(note: Note) {
+  if (note.locked) {
+    removeNoteLock(note.id)
+    return
+  }
+  try {
+    await lockNote(note.id)
+  } catch (error) {
+    if (error instanceof DeviceAuthError && error.cancelled) return
+    await confirmDialog({
+      title: t("Couldn't protect the note", 'No se ha podido proteger la nota'),
+      message: error instanceof Error ? error.message : String(error),
+      notice: true,
+    })
+  }
+}
+
 /** Botón discreto con la carpeta de la nota; abre un selector para moverla o crear una carpeta nueva. */
 export function FolderPicker({ note }: { note: Note }) {
   const path = useApp((s) => folderPathLabel(s.folders, note.folderId))
@@ -226,6 +249,7 @@ export function NoteHeader({ note }: { note: Note }) {
   const close = () => setMenu(null)
 
   const pinLabel = note.pinned ? t('Unpin', 'Desfijar') : t('Pin to top', 'Fijar arriba')
+  const lockLabel = note.locked ? t('Remove protection', 'Quitar protección') : t('Protect note', 'Proteger nota')
   const fullscreenLabel = fullscreen
     ? t('Exit full screen (Esc)', 'Salir de pantalla completa (Esc)')
     : t('Full screen', 'Pantalla completa')
@@ -265,6 +289,17 @@ export function NoteHeader({ note }: { note: Note }) {
         onClick={() => setPinned(note.id, !note.pinned)}
       >
         {note.pinned ? <PinOff size={18} /> : <Pin size={18} />}
+      </button>
+      <button
+        type="button"
+        className="icon-btn note-wide-only"
+        data-active={Boolean(note.locked)}
+        aria-pressed={Boolean(note.locked)}
+        aria-label={lockLabel}
+        title={lockLabel}
+        onClick={() => void toggleLock(note)}
+      >
+        <FingerprintPattern size={18} />
       </button>
       <button
         type="button"
@@ -308,6 +343,17 @@ export function NoteHeader({ note }: { note: Note }) {
         >
           {note.pinned ? <PinOff size={16} /> : <Pin size={16} />}
           {pinLabel}
+        </button>
+        <button
+          type="button"
+          className="menu-item"
+          onClick={() => {
+            close()
+            void toggleLock(note)
+          }}
+        >
+          <FingerprintPattern size={16} />
+          {lockLabel}
         </button>
         <button type="button" className="menu-item danger" onClick={() => trashNote(note.id)}>
           <Trash size={16} />
