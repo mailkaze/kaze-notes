@@ -86,7 +86,8 @@ export function createMemoryBackend(): Backend {
     },
 
     newId() {
-      return crypto.randomUUID().replace(/-/g, '').slice(0, 20)
+      // crypto.randomUUID solo existe con HTTPS o localhost; getRandomValues también funciona por HTTP en la red local.
+      return Array.from(crypto.getRandomValues(new Uint8Array(10)), (b) => b.toString(16).padStart(2, '0')).join('')
     },
 
     write(_uid, ops: WriteOp[]) {
