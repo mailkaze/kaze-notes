@@ -350,6 +350,132 @@ test('dragging a notes-screen card onto a sidebar folder moves it there, and ont
   expect((await storedNotes(page)).find((n) => n.title === 'Viajera')?.pinned).toBe(true)
 })
 
+/** Datos como los importados: notas sueltas y las carpetas Trabajo, Personal (con `perFolder` notas) y Archivadas vacía. */
+async function seedFolders(page: Page, perFolder: number) {
+  await page.evaluate((perFolder) => {
+    const now = Date.now()
+    const notes: Record<string, unknown> = {}
+    const folders: Record<string, unknown> = {}
+    let order = 0
+    const add = (id: string, title: string, folderId: string | null) => {
+      const content = JSON.stringify({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x' }] }] })
+      notes[id] = { id, title, content, preview: 'x', folderId, order: `a${order++}`, pinned: false, color: null }
+      Object.assign(notes[id] as object, { trashed: false, trashedAt: null, createdAt: now, updatedAt: now })
+    }
+    ;['Trabajo', 'Personal', 'Archivadas'].forEach((name, i) => {
+      folders[name] = { id: name, name, parentId: null, order: `a${i}`, createdAt: now, updatedAt: now }
+    })
+    for (let i = 0; i < 2; i++) add(`loose${i}`, `Suelta ${i}`, null)
+    for (let i = 0; i < perFolder; i++) add(`work${i}`, `Trabajo ${i}`, 'Trabajo')
+    for (let i = 0; i < perFolder; i++) add(`home${i}`, `Personal ${i}`, 'Personal')
+    localStorage.setItem('kaze:memory-db', JSON.stringify({ notes, folders }))
+  }, perFolder)
+  await page.reload()
+  await page.locator('.sidebar').getByText('Todas las notas').click()
+}
+
+/** Empieza a arrastrar la tarjeta de la pantalla de notas con ese título. */
+async function grabCard(page: Page, title: string) {
+  const a = await page.getByTestId('note-card').filter({ hasText: title }).boundingBox()
+  if (!a) throw new Error('missing card')
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(a.x + a.width / 2 + 10, a.y + a.height / 2 + 10, { steps: 4 })
+}
+
+async function hover(page: Page, target: Locator) {
+  const b = await target.boundingBox()
+  if (!b) throw new Error('missing target')
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 15 })
+}
+
+const folderOf = async (page: Page, id: string) => (await storedNotes(page)).find((n) => n.id === id)?.folderId
+
+test('a card passing over a folder of notes on its way to the next folder still reaches it (S31)', async ({ page }) => {
+  await seedFolders(page, 12)
+  const trabajo = page.getByTestId('tree-folder').filter({ hasText: 'Trabajo' })
+  const personal = page.getByTestId('tree-folder').filter({ hasText: 'Personal' })
+  await grabCard(page, 'Suelta 0')
+  await hover(page, trabajo)
+  await page.waitForTimeout(900)
+  // Abrirla no sirve para soltar la tarjeta y empujaría hacia abajo las carpetas siguientes.
+  await expect(trabajo.locator('.tree-chevron')).toHaveAttribute('data-expanded', 'false')
+  await hover(page, personal)
+  await expect(personal).toHaveAttribute('data-drop', 'into')
+  await page.mouse.up()
+  await expect.poll(() => folderOf(page, 'loose0')).toBe('Personal')
+})
+
+test('a dragged card shrinks to a small chip next to the pointer over the sidebar and grows back outside it', async ({
+  page,
+}) => {
+  await seedFolders(page, 3)
+  const overlayCard = page.locator('.note-card[data-overlay]')
+  const chip = page.locator('.notes-drag-chip')
+  await grabCard(page, 'Suelta 0')
+  await expect(overlayCard).toBeVisible()
+  await expect(chip).toHaveCount(0)
+
+  const personal = page.getByTestId('tree-folder').filter({ hasText: 'Personal' })
+  await hover(page, personal)
+  await expect(chip).toBeVisible()
+  await expect(chip).toContainText('Suelta 0')
+  await expect(overlayCard).toHaveCount(0)
+  const row = await personal.boundingBox()
+  const box = await chip.boundingBox()
+  if (!row || !box) throw new Error('missing boxes')
+  // Pequeña y junto al puntero (en el centro de la fila), sin tapar la fila de destino.
+  expect(box.width).toBeLessThanOrEqual(230)
+  expect(box.height).toBeLessThan(50)
+  const pointer = { x: row.x + row.width / 2, y: row.y + row.height / 2 }
+  expect(box.x - pointer.x).toBeGreaterThanOrEqual(0)
+  expect(box.x - pointer.x).toBeLessThan(30)
+  expect(box.y - pointer.y).toBeGreaterThanOrEqual(0)
+  expect(box.y - pointer.y).toBeLessThan(30)
+
+  await hover(page, page.getByTestId('note-card').filter({ hasText: 'Suelta 1' }).first())
+  await expect(overlayCard).toBeVisible()
+  await expect(chip).toHaveCount(0)
+
+  await hover(page, personal)
+  await expect(chip).toBeVisible()
+  await page.mouse.up()
+  await expect.poll(() => folderOf(page, 'loose0')).toBe('Personal')
+  await expect(chip).toHaveCount(0)
+})
+
+test('a card dropped on a note inside an open sidebar folder moves into that folder (S31)', async ({ page }) => {
+  await seedFolders(page, 3)
+  const personal = page.getByTestId('tree-folder').filter({ hasText: 'Personal' })
+  await personal.getByRole('button', { name: 'Desplegar carpeta' }).click()
+  await grabCard(page, 'Suelta 0')
+  await hover(page, page.getByTestId('tree-note').filter({ hasText: 'Personal 1' }))
+  await expect(personal).toHaveAttribute('data-drop', 'into')
+  await page.mouse.up()
+  await expect.poll(() => folderOf(page, 'loose0')).toBe('Personal')
+})
+
+test('dragging a card to the edge of the sidebar scrolls it to reach folders below (S31)', async ({ page }) => {
+  await seedFolders(page, 12)
+  for (const name of ['Trabajo', 'Personal']) {
+    await page.getByTestId('tree-folder').filter({ hasText: name }).getByRole('button', { name: 'Desplegar carpeta' }).click()
+  }
+  const scroller = page.locator('.sb-scroll')
+  const archivadas = page.getByTestId('tree-folder').filter({ hasText: 'Archivadas' })
+  await expect(archivadas).not.toBeInViewport()
+  await grabCard(page, 'Suelta 0')
+  const box = await scroller.boundingBox()
+  if (!box) throw new Error('missing sidebar')
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height - 8, { steps: 10 })
+  await expect(archivadas).toBeInViewport({ ratio: 1 })
+  // Fuera del borde se detiene el desplazamiento y la carpeta deja de moverse.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 })
+  await hover(page, archivadas)
+  await expect(archivadas).toHaveAttribute('data-drop', 'into')
+  await page.mouse.up()
+  await expect.poll(() => folderOf(page, 'loose0')).toBe('Archivadas')
+})
+
 test('note header folder picker moves to a folder, to no folder and into a new folder (S31)', async ({ page }) => {
   await page.getByRole('button', { name: 'Nueva carpeta' }).first().click()
   await page.keyboard.type('Trabajo')

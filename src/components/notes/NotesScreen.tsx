@@ -12,6 +12,7 @@ import { FOCUS_SEARCH_EVENT, SidebarToggle } from '../ui/controls'
 import { SyncIndicator } from '../ui/SyncIndicator'
 import { dragEnded, dragStarted, useDragSensors } from '../sidebar/dnd'
 import { useSidebarDrop } from '../sidebar/externalDrop'
+import { DragPreview } from '../sidebar/TreeRows'
 import { NoteCard, SortableNoteCard } from './NoteCard'
 import { reorderKey, splitPinned } from './noteSections'
 import { useNarrow } from './useNarrow'
@@ -52,6 +53,8 @@ function LocationTitle({ folderId }: { folderId: string | null }) {
 
 // Se busca al dejar de teclear: con muchas notas, en un móvil cada búsqueda puede tardar.
 const SEARCH_DELAY = 180
+// Separación entre el puntero y la pastilla de la nota arrastrada sobre la barra lateral.
+const CHIP_OFFSET_PX = 12
 
 /**
  * Término de búsqueda ya asentado (vacío al instante al borrarlo). Se lee fuera de React para que
@@ -191,7 +194,18 @@ function SortableSection({
         </SortableContext>
         {createPortal(
           <DragOverlay dropAnimation={sidebarDrop.dropAnimation}>
-            {active && <NoteCard note={active} layout={layout} path={pathOf(active)} overlay />}
+            {active &&
+              (sidebarDrop.compactAt ? (
+                // Sobre la barra lateral, una pastilla junto al puntero deja ver la carpeta de destino.
+                <div
+                  className="notes-drag-chip"
+                  style={{ left: sidebarDrop.compactAt.x + CHIP_OFFSET_PX, top: sidebarDrop.compactAt.y + CHIP_OFFSET_PX }}
+                >
+                  <DragPreview item={{ kind: 'note', id: active.id }} />
+                </div>
+              ) : (
+                <NoteCard note={active} layout={layout} path={pathOf(active)} overlay />
+              ))}
           </DragOverlay>,
           document.body,
         )}

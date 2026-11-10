@@ -43,7 +43,18 @@ function useDropAttr(id: string): string | undefined {
 
 const depthStyle = (depth: number) => ({ '--depth': depth }) as CSSProperties
 
-export function NoteRow({ note, depth, section }: { note: Note; depth: number; section: 'tree' | 'pinned' }) {
+/** `container`: carpeta en la que el árbol muestra la nota (null = raíz); no se indica en "Fijadas". */
+export function NoteRow({
+  note,
+  depth,
+  section,
+  container,
+}: {
+  note: Note
+  depth: number
+  section: 'tree' | 'pinned'
+  container?: string | null
+}) {
   const { openNoteId, drop } = useTree()
   const { id, setRef, listeners, isDragging } = useTreeDnd(
     { kind: 'note', id: note.id },
@@ -57,6 +68,8 @@ export function NoteRow({ note, depth, section }: { note: Note; depth: number; s
       type="button"
       className="tree-row tree-note"
       data-drop-id={id}
+      // Una tarjeta de la pantalla de notas soltada aquí va a la carpeta de esta nota.
+      data-drop-folder={container === undefined ? undefined : container ? `folder:${container}` : 'root'}
       data-testid="tree-note"
       data-active={openNoteId === note.id}
       data-dragging={isDragging || undefined}
@@ -257,7 +270,7 @@ export function TreeLevel({ parentId, depth }: { parentId: string | null; depth:
         </Fragment>
       ))}
       {(ui.notesByFolder.get(parentId) ?? []).map((note) => (
-        <NoteRow key={note.id} note={note} depth={depth} section="tree" />
+        <NoteRow key={note.id} note={note} depth={depth} section="tree" container={parentId} />
       ))}
     </>
   )

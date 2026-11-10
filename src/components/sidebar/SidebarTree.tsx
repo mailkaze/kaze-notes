@@ -166,12 +166,14 @@ export function SidebarTree({
   const externalOver = useExternalDrop((s) => s.overId)
   const dragging = Boolean(dragItem) || externalDragging
 
-  // Mantener el puntero sobre una carpeta cerrada la despliega.
+  // Mantener el puntero sobre una carpeta cerrada la despliega. Con una tarjeta de la pantalla de notas, solo
+  // si tiene subcarpetas: sus notas no son destino y abrirla empujaría hacia abajo las carpetas siguientes.
+  const externalFolder = externalOver ? dropFolderId(externalOver) : null
   const hoverFolder =
     drop?.result && drop.zone === 'into' && drop.target.kind === 'folder'
       ? drop.target.id
-      : externalOver
-        ? dropFolderId(externalOver)
+      : externalFolder && tree.foldersByParent.has(externalFolder)
+        ? externalFolder
         : null
   useEffect(() => {
     if (!hoverFolder || expanded.has(hoverFolder)) return
