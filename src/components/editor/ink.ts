@@ -7,6 +7,14 @@ import type { EditorView, NodeView } from '@tiptap/pm/view'
 /** Ancho lógico de un bloque: los trazos se guardan en estas unidades y se escalan al ancho real. */
 export const INK_WIDTH = 2000
 export const INK_DEFAULT_HEIGHT = 600
+/** Altura máxima de un bloque (20 veces su ancho), también para lo que llega pegado. */
+export const INK_MAX_HEIGHT = 40_000
+/** Píxeles que puede tener un lienzo: Safari en iPad no dibuja los de más de 4096 × 4096. */
+export const INK_MAX_CANVAS_PIXELS = 16_000_000
+/** Lo que puede desviarse un trazo simplificado, en unidades lógicas: menos de un píxel en pantalla. */
+const SIMPLIFY_TOLERANCE = 1.5
+/** Peso de la presión (0-100) frente a la posición al simplificar, según lo que cambia el grosor. */
+const PRESSURE_WEIGHT = 0.05
 const GROW_MARGIN = 200
 const GROW_STEP = 600
 const LINE_WIDTH = 7
@@ -46,18 +54,71 @@ export function inkTarget(blocks: BlockBox[], y: number): InkTarget {
 
 /** El bloque se alarga cuando se escribe cerca de su borde inferior. */
 export function inkHeightFor(height: number, maxY: number): number {
-  return maxY > height - GROW_MARGIN ? Math.ceil(maxY + GROW_STEP) : height
+  return maxY > height - GROW_MARGIN ? Math.min(INK_MAX_HEIGHT, Math.ceil(maxY + GROW_STEP)) : height
+}
+
+/** Altura válida para un bloque, venga de donde venga (p. ej. HTML pegado de otra página). */
+function clampInkHeight(value: unknown): number {
+  const height = Number(value)
+  return Number.isFinite(height) && height > 0 ? Math.min(INK_MAX_HEIGHT, Math.round(height)) : INK_DEFAULT_HEIGHT
+}
+
+/** Densidad del lienzo: la de la pantalla, salvo en bloques tan altos que el lienzo no se podría dibujar. */
+export function inkCanvasRatio(cssWidth: number, cssHeight: number, dpr: number): number {
+  const area = cssWidth * cssHeight
+  return area > 0 ? Math.min(dpr, Math.sqrt(INK_MAX_CANVAS_PIXELS / area)) : dpr
 }
 
 function parseStrokes(value: string | null): Stroke[] {
   try {
     const strokes: unknown = JSON.parse(value ?? '[]')
     return Array.isArray(strokes)
-      ? strokes.filter((s): s is Stroke => Array.isArray(s) && s.every((n) => typeof n === 'number'))
+      ? strokes.filter(
+          (s): s is Stroke =>
+            Array.isArray(s) && s.length > 0 && s.length % 3 === 0 && s.every((n) => typeof n === 'number'),
+        )
       : []
   } catch {
     return []
   }
+}
+
+/** Distancia del punto `i` al segmento entre los puntos `a` y `b`, con la presión como tercera dimensión. */
+function distanceToSegment(s: Stroke, i: number, a: number, b: number): number {
+  const at = (k: number) => [s[k * 3], s[k * 3 + 1], s[k * 3 + 2] * PRESSURE_WEIGHT]
+  const [p, from, to] = [at(i), at(a), at(b)]
+  const d = to.map((v, k) => v - from[k])
+  const len2 = d[0] ** 2 + d[1] ** 2 + d[2] ** 2
+  const t = len2 ? Math.min(1, Math.max(0, ((p[0] - from[0]) * d[0] + (p[1] - from[1]) * d[1] + (p[2] - from[2]) * d[2]) / len2)) : 0
+  return Math.hypot(p[0] - from[0] - t * d[0], p[1] - from[1] - t * d[1], p[2] - from[2] - t * d[2])
+}
+
+/**
+ * Quita los puntos que no cambian el dibujo (Ramer-Douglas-Peucker): el lápiz manda cientos de puntos por
+ * segundo y, sin esto, unas pocas páginas a mano llenan el máximo de 1 MB de una nota.
+ */
+export function simplifyStroke(s: Stroke): Stroke {
+  const n = s.length / 3
+  if (n <= 2) return s
+  const keep = new Uint8Array(n)
+  keep[0] = keep[n - 1] = 1
+  const ranges: [number, number][] = [[0, n - 1]]
+  while (ranges.length) {
+    const [a, b] = ranges.pop()!
+    let worst = 0
+    let index = -1
+    for (let i = a + 1; i < b; i++) {
+      const d = distanceToSegment(s, i, a, b)
+      if (d > worst) [worst, index] = [d, i]
+    }
+    if (worst > SIMPLIFY_TOLERANCE) {
+      keep[index] = 1
+      ranges.push([a, index], [index, b])
+    }
+  }
+  const out: Stroke = []
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(s[i * 3], s[i * 3 + 1], s[i * 3 + 2])
+  return out
 }
 
 function pressureOf(e: PointerEvent): number {
@@ -106,7 +167,7 @@ class InkView implements NodeView {
     private getPos: () => number | undefined,
   ) {
     this.node = node
-    this.height = node.attrs.height
+    this.height = clampInkHeight(node.attrs.height)
     this.dom = document.createElement('div')
     this.dom.className = 'ink-block'
     this.dom.contentEditable = 'false'
@@ -128,10 +189,11 @@ class InkView implements NodeView {
   /** Ajusta el lienzo al ancho real (la altura sale de la proporción) y lo redibuja. */
   private layout() {
     this.canvas.style.aspectRatio = `${INK_WIDTH} / ${this.height}`
-    const dpr = window.devicePixelRatio || 1
     const width = this.dom.clientWidth
-    this.canvas.width = Math.round(width * dpr)
-    this.canvas.height = Math.round(((width * this.height) / INK_WIDTH) * dpr)
+    const height = (width * this.height) / INK_WIDTH
+    const ratio = inkCanvasRatio(width, height, window.devicePixelRatio || 1)
+    this.canvas.width = Math.round(width * ratio)
+    this.canvas.height = Math.round(height * ratio)
     this.redraw()
   }
 
@@ -153,12 +215,12 @@ class InkView implements NodeView {
     if (this.drawing) drawStroke(ctx, this.drawing.points, scale)
   }
 
-  /** Sigue el lápiz `pointerId` desde los puntos ya recibidos hasta que se levanta. */
-  track(pointerId: number, start: ClientPoint[], fresh: boolean) {
+  /** Sigue el lápiz `pointerId` desde los puntos ya recibidos hasta que se levanta. Devuelve false si no puede. */
+  track(pointerId: number, start: ClientPoint[], fresh: boolean): boolean {
     this.stopTracking()
     this.layout()
     const rect = this.canvas.getBoundingClientRect()
-    if (!rect.width) return
+    if (!rect.width) return false
     const unit = rect.width / INK_WIDTH
     // Un bloque nuevo empieza bajo el texto anterior: si el trazo empezó más arriba, se baja para que quepa.
     const offsetY = fresh ? Math.max(0, TOP_PAD - Math.min(...start.map(([, y]) => (y - rect.top) / unit))) : 0
@@ -169,7 +231,7 @@ class InkView implements NodeView {
       const r = this.canvas.getBoundingClientRect()
       const u = r.width / INK_WIDTH
       const px = Math.round(Math.min(INK_WIDTH, Math.max(0, (x - r.left) / u)))
-      const py = Math.round(Math.max(0, (y - r.top) / u + drawing.offsetY))
+      const py = Math.round(Math.min(INK_MAX_HEIGHT, Math.max(0, (y - r.top) / u + drawing.offsetY)))
       const pts = drawing.points
       const n = pts.length
       if (n && pts[n - 3] === px && pts[n - 2] === py) return
@@ -203,6 +265,7 @@ class InkView implements NodeView {
       this.stopTracking = () => {}
     }
     start.forEach(add)
+    return true
   }
 
   private commit(drawing: Drawing) {
@@ -212,7 +275,7 @@ class InkView implements NodeView {
       this.redraw()
       return
     }
-    const strokes = [...(this.node.attrs.strokes as Stroke[]), drawing.points]
+    const strokes = [...(this.node.attrs.strokes as Stroke[]), simplifyStroke(drawing.points)]
     const tr = this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, strokes, height: this.height })
     // El primer trazo de un bloque nuevo se deshace junto con su creación; los demás, de uno en uno.
     if (drawing.fresh) tr.setMeta('appendedTransaction', tr)
@@ -223,7 +286,7 @@ class InkView implements NodeView {
   update(node: PMNode) {
     if (node.type !== this.node.type) return false
     this.node = node
-    if (!this.drawing) this.height = node.attrs.height
+    if (!this.drawing) this.height = clampInkHeight(node.attrs.height)
     this.layout()
     return true
   }
@@ -243,8 +306,8 @@ class InkView implements NodeView {
   }
 }
 
-/** Crea un bloque vacío donde cae el lápiz (a la altura `y`) y devuelve su vista. */
-function insertInk(view: EditorView, y: number): InkView | undefined {
+/** Crea un bloque donde cae el lápiz (a la altura `y`) y le pasa el trazo; si no puede seguirlo, no deja el bloque. */
+function insertInk(view: EditorView, y: number, pointerId: number, points: ClientPoint[]) {
   const { state } = view
   const spots: { pos: number; size: number }[] = []
   const blocks: BlockBox[] = []
@@ -263,7 +326,18 @@ function insertInk(view: EditorView, y: number): InkView | undefined {
   // Escribir justo después de teclear no debe deshacerse junto con el texto.
   view.dispatch(closeHistory(tr))
   const dom = view.nodeDOM(at)
-  return dom ? views.get(dom) : undefined
+  if (dom && views.get(dom)?.track(pointerId, points, true)) return
+  // Un bloque sin trazos quedaría vacío en la nota: se vuelve al documento de antes, incluido lo que
+  // otros plugins añadieron al crearlo (p. ej. el párrafo final).
+  const before = state.doc
+  const now = view.state.doc
+  const start = before.content.findDiffStart(now.content)
+  const end = now.content.findDiffEnd(before.content)
+  if (start === null || !end) return
+  const overlap = Math.max(0, start - Math.min(end.a, end.b))
+  view.dispatch(
+    view.state.tr.replace(start, end.a + overlap, before.slice(start, end.b + overlap)).setMeta('addToHistory', false),
+  )
 }
 
 /** Lápiz apoyado fuera de un bloque: cuando se mueve, crea el bloque ahí y le pasa el trazo. */
@@ -279,7 +353,7 @@ function startInk(view: EditorView, down: PointerEvent) {
     points.push([e.clientX, e.clientY, pressureOf(e)])
     if (Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < START_DISTANCE) return
     stop()
-    insertInk(view, down.clientY)?.track(down.pointerId, points, true)
+    insertInk(view, down.clientY, down.pointerId, points)
   }
   const end = (e: PointerEvent) => {
     if (e.pointerId === down.pointerId) stop()
@@ -289,8 +363,12 @@ function startInk(view: EditorView, down: PointerEvent) {
   window.addEventListener('pointercancel', end)
 }
 
-function penWrites(target: EventTarget | null): boolean {
-  return target instanceof Element && (Boolean(target.closest('.ink-block')) || !target.closest(CONTROLS))
+function penWrites(view: EditorView, target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  if (target.closest('.ink-block')) return true
+  // En modo lápiz la propia nota tiene contenteditable="false": eso no la convierte en un control.
+  const control = target.closest(CONTROLS)
+  return !control || control === view.dom
 }
 
 const penModeKey = new PluginKey<boolean>('inkPen')
@@ -320,10 +398,10 @@ function inkPenPlugin() {
         const stylus = Array.from(e.changedTouches).some(
           (t) => (t as Touch & { touchType?: string }).touchType === 'stylus',
         )
-        if (stylus && penWrites(e.target)) e.preventDefault()
+        if (stylus && penWrites(view, e.target)) e.preventDefault()
       }
       const onPointerDown = (e: PointerEvent) => {
-        const writes = e.pointerType === 'pen' && penWrites(e.target)
+        const writes = e.pointerType === 'pen' && penWrites(view, e.target)
         setPenMode(writes)
         // Si cae sobre un bloque, el bloque ya sigue el trazo.
         if (!writes || e.defaultPrevented) return
@@ -332,7 +410,7 @@ function inkPenPlugin() {
       }
       // Lápiz flotando sobre la nota (iPad con hover): se prepara antes de tocar la pantalla.
       const onPointerMove = (e: PointerEvent) => {
-        if (e.pointerType === 'pen' && e.buttons === 0 && penWrites(e.target)) setPenMode(true)
+        if (e.pointerType === 'pen' && e.buttons === 0 && penWrites(view, e.target)) setPenMode(true)
       }
       view.dom.addEventListener('touchstart', onTouch, { passive: false })
       view.dom.addEventListener('touchmove', onTouch, { passive: false })
@@ -367,7 +445,7 @@ export const Ink = Node.create({
       },
       height: {
         default: INK_DEFAULT_HEIGHT,
-        parseHTML: (el) => Number(el.getAttribute('data-height')) || INK_DEFAULT_HEIGHT,
+        parseHTML: (el) => clampInkHeight(el.getAttribute('data-height')),
         renderHTML: (attrs) => ({ 'data-height': attrs.height }),
       },
     }

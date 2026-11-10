@@ -611,6 +611,31 @@ test('a change from another device while typing is kept as a conflict copy next 
   await expect(page.getByTestId('tree-note').filter({ hasText: 'Lista (conflicto)' })).toBeVisible()
 })
 
+test('a note too large to save says so inside the note, and the notice goes once it fits again', async ({ page }) => {
+  await newNote(page, 'Enorme', 'x')
+  await expect.poll(async () => (await storedNote(page, 'Enorme'))?.content ?? '').toContain('x')
+  const id = (await storedNote(page, 'Enorme'))!.id
+  // Contenido de más de 900 KB llegado de otro dispositivo; el siguiente cambio local ya no cabe.
+  await page.evaluate(async (id) => {
+    const url = '/src/lib/backend/index.ts'
+    const { backend } = await import(/* @vite-ignore */ url)
+    const text = 'a'.repeat(950_000)
+    const content = JSON.stringify({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+    await backend.write('local', [{ type: 'setNote', id, data: { content, preview: 'a', updatedAt: Date.now() } }])
+  }, id)
+  await expect(page.locator('.ProseMirror')).toContainText('aaaa')
+  await page.locator('.ProseMirror').click()
+  await page.keyboard.type('b')
+  const notice = page.getByRole('alert').filter({ hasText: 'demasiado grande' })
+  await expect(notice).toBeVisible()
+  await expect(notice).toContainText('no se han guardado')
+
+  await page.keyboard.press(`${mod}+a`)
+  await page.keyboard.type('corta')
+  await expect(notice).toHaveCount(0)
+  await expect.poll(async () => (await storedNote(page, 'Enorme'))?.content ?? '').toContain('corta')
+})
+
 test('a copied attachment keeps its file when the note that uploaded it is deleted forever', async ({ page }) => {
   await fakeStorage(page, 300)
   await newNote(page, 'Origen', 'texto ')
@@ -891,6 +916,31 @@ test('more pencil strokes go to the same block, which grows near its bottom; und
   await undo()
   await expect.poll(async () => (await storedInk(page, 'Trazos')).map((i) => i.strokes.length)).toEqual([1])
   await expect(block).toHaveCount(1)
+})
+
+test('when the new handwriting block cannot follow the pencil, no empty block is left and an empty line it took comes back', async ({
+  page,
+}) => {
+  await newNote(page, 'Sin bloque', 'Hola')
+  await page.keyboard.press('Enter')
+  const empty = (await page.locator('.ProseMirror p').nth(1).boundingBox())!
+  // Lienzo sin tamaño (p. ej. la nota aún sin maquetar): el bloque no puede seguir el trazo.
+  await page.evaluate(() => {
+    const original = HTMLCanvasElement.prototype.getBoundingClientRect
+    HTMLCanvasElement.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0)
+    ;(window as unknown as { restoreRect: () => void }).restoreRect = () => {
+      HTMLCanvasElement.prototype.getBoundingClientRect = original
+    }
+  })
+  await stroke(page, scribble(empty.x + 40, empty.y + empty.height / 2))
+  await expect(page.locator('.ink-block')).toHaveCount(0)
+  await expect(page.locator('.ProseMirror p')).toHaveCount(2)
+  await expect(page.locator('.ProseMirror p').first()).toHaveText('Hola')
+
+  await page.evaluate(() => (window as unknown as { restoreRect: () => void }).restoreRect())
+  await stroke(page, scribble(empty.x + 40, empty.y + empty.height / 2))
+  await expect(page.locator('.ink-block')).toHaveCount(1)
+  await expect.poll(async () => (await storedInk(page, 'Sin bloque')).map((i) => i.strokes.length)).toEqual([1])
 })
 
 test('an untitled note with only handwriting is kept when leaving it', async ({ page }) => {

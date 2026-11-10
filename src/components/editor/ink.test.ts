@@ -2,7 +2,16 @@ import { Editor } from '@tiptap/core'
 import { afterEach, describe, expect, it } from 'vitest'
 import { hasContent, previewFromDoc } from '../../lib/docText'
 import { createExtensions } from './extensions'
-import { INK_DEFAULT_HEIGHT, inkHeightFor, inkTarget, type BlockBox } from './ink'
+import {
+  INK_DEFAULT_HEIGHT,
+  INK_MAX_CANVAS_PIXELS,
+  INK_MAX_HEIGHT,
+  inkCanvasRatio,
+  inkHeightFor,
+  inkTarget,
+  simplifyStroke,
+  type BlockBox,
+} from './ink'
 
 const editors: Editor[] = []
 
@@ -55,6 +64,10 @@ describe('inkHeightFor', () => {
   it('grows when the stroke gets close to the bottom', () => {
     expect(inkHeightFor(INK_DEFAULT_HEIGHT, 450)).toBeGreaterThan(450 + 300)
   })
+
+  it('never grows past the maximum height', () => {
+    expect(inkHeightFor(INK_MAX_HEIGHT, INK_MAX_HEIGHT)).toBe(INK_MAX_HEIGHT)
+  })
 })
 
 describe('handwriting as note content', () => {
@@ -90,5 +103,76 @@ describe('ink node', () => {
   it('keeps its strokes and height through HTML (copy and paste inside the app)', () => {
     const html = makeEditor(doc).getHTML()
     expect(makeEditor(html).getJSON()).toEqual(doc)
+  })
+})
+
+describe('handwriting pasted from elsewhere', () => {
+  const pasted = (attrs: string) =>
+    makeEditor(`<div data-type="ink" ${attrs}></div>`)
+      .getJSON()
+      .content?.find((n) => n.type === 'ink')?.attrs
+
+  it('caps a huge height, so the block cannot ask for a canvas larger than the device can hold', () => {
+    expect(pasted('data-height="1000000000"')?.height).toBe(INK_MAX_HEIGHT)
+  })
+
+  it('uses the default height when the pasted one is not a positive number', () => {
+    for (const height of ['-50', '0', 'abc', 'Infinity']) {
+      expect(pasted(`data-height="${height}"`)?.height).toBe(INK_DEFAULT_HEIGHT)
+    }
+  })
+
+  it('drops strokes that are not whole [x, y, pressure] points', () => {
+    expect(pasted('data-strokes="[[1,2,3],[1,2],[],[1,2,3,4,5,6]]"')?.strokes).toEqual([
+      [1, 2, 3],
+      [1, 2, 3, 4, 5, 6],
+    ])
+  })
+})
+
+describe('inkCanvasRatio', () => {
+  it('draws at the screen density for ordinary blocks', () => {
+    expect(inkCanvasRatio(800, 240, 2)).toBe(2)
+  })
+
+  it('lowers the density of very tall blocks to stay within the canvas size iPad Safari can draw', () => {
+    const ratio = inkCanvasRatio(800, 16000, 2)
+    expect(ratio).toBeLessThan(2)
+    expect(800 * ratio * 16000 * ratio).toBeLessThanOrEqual(INK_MAX_CANVAS_PIXELS)
+  })
+})
+
+describe('simplifyStroke', () => {
+  const xs = (s: number[]) => s.filter((_, i) => i % 3 === 0)
+
+  it('drops points that lie on a straight line, keeping both ends', () => {
+    const line = Array.from({ length: 50 }, (_, i) => [i * 2, 100, 50]).flat()
+    expect(simplifyStroke(line)).toEqual([0, 100, 50, 98, 100, 50])
+  })
+
+  it('keeps the corners of a zigzag', () => {
+    const zigzag = Array.from({ length: 12 }, (_, i) => [i * 30, (i % 2) * 35, 60]).flat()
+    expect(simplifyStroke(zigzag)).toEqual(zigzag)
+  })
+
+  it('keeps a point where the pressure changes, so the line width stays the same', () => {
+    const press = [0, 0, 20, 10, 0, 20, 20, 0, 90, 30, 0, 90, 40, 0, 20]
+    expect(xs(simplifyStroke(press))).toEqual([0, 10, 20, 30, 40])
+  })
+
+  it('keeps a single point and a two-point stroke as they are', () => {
+    expect(simplifyStroke([5, 6, 50])).toEqual([5, 6, 50])
+    expect(simplifyStroke([5, 6, 50, 7, 8, 50])).toEqual([5, 6, 50, 7, 8, 50])
+  })
+
+  it('makes a slow, densely sampled curve much smaller without moving it more than a pixel', () => {
+    const curve = Array.from({ length: 400 }, (_, i) => {
+      const a = (i / 400) * Math.PI
+      return [Math.round(1000 + 300 * Math.cos(a)), Math.round(400 + 300 * Math.sin(a)), 50]
+    }).flat()
+    const simple = simplifyStroke(curve)
+    expect(simple.length).toBeLessThan(curve.length / 4)
+    expect(simple.slice(0, 3)).toEqual(curve.slice(0, 3))
+    expect(simple.slice(-3)).toEqual(curve.slice(-3))
   })
 })

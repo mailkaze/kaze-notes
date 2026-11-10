@@ -57,6 +57,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
 
 function EditorScreen({ noteId }: { noteId: string }) {
   const note = useApp((s) => s.notes[noteId])
+  const tooLarge = useApp((s) => s.sync.tooLarge.includes(noteId))
   const [initial] = useState(() => useApp.getState().notes[noteId])
   const [title, setTitle] = useState(initial.title)
   const [emoji] = useState(() => new EmojiMenuController())
@@ -247,6 +248,15 @@ function EditorScreen({ noteId }: { noteId: string }) {
     >
       <NoteHeader note={note} />
       <FormatToolbar editor={editor} onAttach={() => fileRef.current?.click()} />
+      {/* El indicador de sincronización solo lo explica en un tooltip, que en el iPad no se ve. */}
+      {tooLarge && (
+        <p className="note-too-large" role="alert">
+          {t(
+            'This note is too large to save (max 1 MB). Your latest changes are not saved: delete something or move part of it to another note.',
+            'Esta nota es demasiado grande para guardarse (máx. 1 MB). Los últimos cambios no se han guardado: borra algo o pasa una parte a otra nota.',
+          )}
+        </p>
+      )}
       <div className="note-scroll">
         <div className="note-page">
           <input

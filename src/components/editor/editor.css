@@ -65,6 +65,14 @@
   font-size: 13.5px;
 }
 
+.note-too-large {
+  margin: 0;
+  padding: 8px max(var(--note-pad), env(safe-area-inset-right)) 8px max(var(--note-pad), env(safe-area-inset-left));
+  border-bottom: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 13.5px;
+}
+
 .note-locked-reset {
   height: auto;
   min-height: 32px;
