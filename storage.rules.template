@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // App personal: solo la cuenta propietaria puede entrar, y únicamente a sus adjuntos.
+    function isOwner(uid) {
+      return request.auth != null
+        && request.auth.uid == uid
+        && request.auth.token.email == '__OWNER_EMAIL__'
+        && request.auth.token.email_verified == true;
+    }
+
+    // Adjuntos: users/{uid}/notes/{noteId}/{fichero}.
+    match /users/{uid}/{allPaths=**} {
+      allow read, delete: if isOwner(uid);
+      // Límite de 100 MB por fichero.
+      allow create, update: if isOwner(uid) && request.resource.size < 100 * 1024 * 1024;
+    }
+  }
+}

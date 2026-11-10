@@ -1,0 +1,49 @@
+{
+  "name": "kaze-notes",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:memory": "vite --mode memory",
+    "build": "tsc --noEmit -p . && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "rules:build": "node scripts/build-rules.mjs",
+    "rules:deploy": "node scripts/build-rules.mjs && firebase deploy --only firestore:rules,storage"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "jsdom": "^29.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.7",
+    "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@tiptap/extension-bold": "^3.33.1",
+    "@tiptap/extension-italic": "^3.33.1",
+    "@tiptap/extension-list": "^3.33.1",
+    "@tiptap/extension-strike": "^3.33.1",
+    "@tiptap/extensions": "^3.33.1",
+    "@tiptap/pm": "^3.33.1",
+    "@tiptap/react": "^3.33.1",
+    "@tiptap/starter-kit": "^3.33.1",
+    "@tiptap/suggestion": "^3.33.1",
+    "emojibase-data": "^18.0.0",
+    "firebase": "^13.2.0",
+    "fractional-indexing": "^4.0.0",
+    "linkifyjs": "^4.4.0",
+    "lucide-react": "^1.71.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zustand": "^5.1.0"
+  }
+}

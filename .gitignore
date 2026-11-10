@@ -1,0 +1,16 @@
+node_modules
+dist
+.env.local
+.env.*.local
+.firebase
+test-results
+playwright-report
+.DS_Store
+.atl
+
+# Reglas generadas desde las plantillas (llevan el correo de la cuenta propietaria)
+firestore.rules
+storage.rules
+
+# Documentos de trabajo locales
+odd/

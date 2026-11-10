@@ -1,0 +1,757 @@
+/* ---------- Pantalla de la nota ---------- */
+.note-editor {
+  /* Margen lateral del texto: crece con el ancho disponible (cqi = ancho de la propia nota). */
+  --note-pad: clamp(16px, 5cqi, 64px);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  container: note / inline-size;
+  color: var(--text);
+  transition: background-color 0.18s ease;
+}
+
+/* Con color de fondo, el texto y los grises se derivan de --note-text para mantener el contraste. */
+.note-editor[data-colored='true'] {
+  --text: var(--note-text);
+  --text-muted: color-mix(in srgb, var(--note-text) 68%, transparent);
+  --text-faint: color-mix(in srgb, var(--note-text) 45%, transparent);
+  --hover: color-mix(in srgb, var(--note-text) 9%, transparent);
+  --active: color-mix(in srgb, var(--note-text) 15%, transparent);
+  --border: color-mix(in srgb, var(--note-text) 16%, transparent);
+  color: var(--note-text);
+}
+
+.note-editor[data-colored='true'] .icon-btn[data-active='true'] {
+  background: var(--active);
+  color: var(--note-text);
+}
+
+/* ---------- Cabecera ---------- */
+.note-editor .note-header {
+  gap: 2px;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.app[data-fullscreen='true'] .note-editor .sidebar-toggle {
+  display: none !important;
+}
+
+.note-path {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  padding: 0 2px;
+  color: var(--text-muted);
+}
+
+/* Carpeta de la nota: botón discreto que abre el selector de carpeta. */
+.note-folder-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  height: 30px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.note-folder-btn[data-empty] {
+  font-weight: 450;
+  color: var(--text-faint);
+}
+
+.note-folder-btn:hover,
+.note-folder-btn[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.note-folder-btn svg {
+  flex: none;
+}
+
+.note-folder-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-folder-chevron {
+  opacity: 0.6;
+}
+
+/* ---------- Selector de carpeta ---------- */
+.folder-picker-pop {
+  display: flex;
+  flex-direction: column;
+  width: min(300px, calc(100vw - 16px));
+  overflow: hidden;
+}
+
+.folder-picker {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.folder-picker-input {
+  flex: none;
+  width: 100%;
+  height: 34px;
+  margin-bottom: 4px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.folder-picker-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.folder-picker-list {
+  min-height: 0;
+  max-height: min(320px, 55dvh);
+  overflow-y: auto;
+}
+
+.folder-picker-option {
+  gap: 8px;
+  padding-left: calc(10px + var(--depth, 0) * 16px);
+  cursor: pointer;
+}
+
+/* El resaltado sigue al teclado y al ratón (no al :hover genérico de los menús). */
+.folder-picker-option:hover {
+  background: transparent;
+}
+
+.folder-picker-option[aria-selected='true'] {
+  background: var(--hover);
+}
+
+.folder-picker-option[data-current] {
+  font-weight: 600;
+}
+
+.folder-picker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.folder-picker-check {
+  color: var(--accent) !important;
+}
+
+.folder-picker-empty {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.note-header .sync-indicator {
+  margin-right: 4px;
+}
+
+.note-more {
+  display: none !important;
+}
+
+/* Ventanas o pantallas estrechas: color, fijar y papelera pasan al menú "⋯". */
+@container note (max-width: 540px) {
+  .note-header .note-wide-only {
+    display: none !important;
+  }
+
+  .note-more {
+    display: inline-flex !important;
+  }
+
+  .note-header .sync-indicator {
+    width: 28px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .note-header .sync-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+/* ---------- Colores ---------- */
+.color-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 32px);
+  gap: 8px;
+  padding: 6px;
+}
+
+.color-swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
+  border-radius: 50%;
+  color: var(--note-text);
+  transition: transform 0.12s ease;
+}
+
+.color-swatch:hover {
+  transform: scale(1.08);
+}
+
+.color-swatch[data-active='true'] {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--accent);
+}
+
+.color-swatch-none {
+  background-image: linear-gradient(
+    135deg,
+    transparent 46%,
+    var(--danger) 46%,
+    var(--danger) 54%,
+    transparent 54%
+  ) !important;
+}
+
+/* ---------- Barra de formatos ---------- */
+.note-toolbar {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+  padding: 0 max(calc(var(--note-pad) - 8px), env(safe-area-inset-right)) 6px
+    max(calc(var(--note-pad) - 8px), env(safe-area-inset-left));
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.note-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+.note-toolbar .icon-btn {
+  width: 32px;
+  height: 32px;
+}
+
+.toolbar-sep {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+/* ---------- Área de escritura ---------- */
+.note-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.note-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 18px max(var(--note-pad), env(safe-area-inset-right)) calc(48px + env(safe-area-inset-bottom))
+    max(var(--note-pad), env(safe-area-inset-left));
+}
+
+.note-title {
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: clamp(25px, calc(17px + 2.2cqi), 33px);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  outline: none;
+}
+
+.note-title::placeholder {
+  color: var(--text-faint);
+}
+
+.note-title:focus-visible {
+  box-shadow: none;
+}
+
+.note-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.note-body {
+  flex: 1;
+  min-height: 6em;
+  outline: none;
+  font-size: 20px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  caret-color: var(--accent);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.note-body:focus-visible {
+  box-shadow: none;
+}
+
+.note-body p {
+  margin: 0;
+}
+
+.note-body p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.note-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.note-editor[data-colored='true'] .note-body a {
+  color: inherit;
+  text-decoration-thickness: 1.5px;
+}
+
+.note-body s {
+  text-decoration-thickness: 1.5px;
+}
+
+.emoji-query {
+  border-radius: 3px;
+  background: var(--accent-soft);
+}
+
+/* ---------- Listas ---------- */
+.note-body ul {
+  margin: 0;
+  padding-left: 1.45em;
+}
+
+.note-body ul li::marker {
+  color: var(--text-muted);
+}
+
+.note-body ul ul {
+  list-style-type: circle;
+}
+
+.note-body ul ul ul {
+  list-style-type: square;
+}
+
+.note-body ul[data-type='taskList'] {
+  padding-left: 0;
+  list-style: none;
+}
+
+.note-body ul[data-type='taskList'] > li {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+
+.note-body ul[data-type='taskList'] > li > label {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: 1.6em;
+  user-select: none;
+}
+
+.note-body ul[data-type='taskList'] > li > div {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Casilla propia: cuadrado redondeado que se rellena con un degradado y una marca animada. */
+.note-body {
+  --check-bg: linear-gradient(145deg, color-mix(in srgb, var(--accent) 72%, #fff), var(--accent));
+  --check-border: color-mix(in srgb, var(--text-muted) 60%, transparent);
+  --check-ring: color-mix(in srgb, var(--accent) 18%, transparent);
+  --check-mark: #fff;
+  --check-box: var(--surface);
+}
+
+.note-editor[data-colored='true'] .note-body {
+  --check-bg: var(--note-text);
+  --check-border: color-mix(in srgb, var(--note-text) 45%, transparent);
+  --check-ring: color-mix(in srgb, var(--note-text) 14%, transparent);
+  --check-mark: var(--bg);
+  --check-box: color-mix(in srgb, #fff 35%, transparent);
+}
+
+.note-body ul[data-type='taskList'] > li input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: grid;
+  place-content: center;
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  margin: 0;
+  border: 2px solid var(--check-border);
+  border-radius: 0.34em;
+  background: var(--check-box);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease;
+}
+
+.note-body ul[data-type='taskList'] > li input[type='checkbox']::before {
+  content: '';
+  width: 0.62em;
+  height: 0.62em;
+  background: var(--check-mark);
+  clip-path: polygon(12% 50%, 0 66%, 38% 100%, 100% 24%, 86% 10%, 38% 70%);
+  transform: scale(0);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.note-body ul[data-type='taskList'] > li input[type='checkbox']:hover {
+  border-color: color-mix(in srgb, var(--check-border) 30%, var(--accent));
+  box-shadow: 0 0 0 4px var(--check-ring);
+}
+
+.note-editor[data-colored='true'] .note-body ul[data-type='taskList'] > li input[type='checkbox']:hover {
+  border-color: var(--note-text);
+}
+
+.note-body ul[data-type='taskList'] > li input[type='checkbox']:active {
+  transform: scale(0.88);
+}
+
+.note-body ul[data-type='taskList'] > li input[type='checkbox']:focus-visible {
+  box-shadow: var(--focus);
+}
+
+.note-body ul[data-type='taskList'] > li input[type='checkbox']:checked {
+  border-color: transparent;
+  background: var(--check-bg);
+}
+
+.note-body ul[data-type='taskList'] > li input[type='checkbox']:checked::before {
+  transform: scale(1);
+}
+
+/* Casillas marcadas: atenuadas y tachadas (solo el texto propio, no el de las anidadas). */
+.note-body li[data-checked='true'] > div > p {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-faint);
+  transition: color 0.2s ease;
+}
+
+.note-editor[data-colored='true'] .note-body li[data-checked='true'] > div > p {
+  color: inherit;
+  opacity: 0.6;
+  text-decoration-color: currentColor;
+}
+
+.task-grip {
+  position: absolute;
+  top: 0;
+  left: -20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 1.6em;
+  border-radius: 4px;
+  color: var(--text-faint);
+  cursor: grab;
+  opacity: 0;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  transition: opacity 0.12s ease;
+}
+
+.note-body ul[data-type='taskList'] > li:hover > .task-grip,
+.task-grip:focus-visible {
+  opacity: 1;
+}
+
+.task-grip:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+@media (hover: none) {
+  .task-grip {
+    opacity: 0.5;
+  }
+}
+
+/* Deja sitio al asa cuando el margen lateral es pequeño. */
+@container note (max-width: 640px) {
+  .note-body > ul[data-type='taskList'] {
+    padding-left: 6px;
+  }
+}
+
+.task-dragging,
+.task-dragging * {
+  cursor: grabbing !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+.task-drop-indicator {
+  position: fixed;
+  z-index: 120;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+  pointer-events: none;
+}
+
+/* ---------- Adjuntos ---------- */
+.attachment-node {
+  display: inline;
+}
+
+.attachment-node.ProseMirror-selectednode {
+  outline: none;
+}
+
+.attachment {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  margin: 2px 1px;
+  vertical-align: middle;
+  line-height: 1.3;
+}
+
+.attachment-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(100%, 340px);
+  padding: 5px 10px 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  font-size: 14px;
+  vertical-align: middle;
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.attachment-chip:hover {
+  border-color: var(--border-strong);
+}
+
+.attachment-image,
+.attachment-image .attachment-chip {
+  /* La miniatura se apoya en la línea de texto, como una imagen en línea. */
+  vertical-align: bottom;
+}
+
+.attachment-image .attachment-chip {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  max-width: 230px;
+  padding: 4px;
+}
+
+.attachment-image img {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  height: 160px;
+  border-radius: 7px;
+  object-fit: cover;
+}
+
+.attachment-image .attachment-text {
+  padding: 0 4px 2px;
+}
+
+.attachment-icon {
+  flex: none;
+  color: var(--accent);
+}
+
+.note-editor[data-colored='true'] .attachment-icon {
+  color: var(--note-text);
+}
+
+.attachment-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.attachment-name {
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attachment-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.attachment-error {
+  color: var(--danger);
+}
+
+.attachment[data-state='error'] .attachment-chip {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+
+.attachment[data-state='uploading'] .attachment-chip {
+  cursor: progress;
+}
+
+.attachment[data-state='uploading'] img {
+  opacity: 0.65;
+}
+
+.attachment[data-selected='true'] .attachment-chip {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.attachment-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--hover);
+}
+
+.attachment-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.attachment-delete {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+  box-shadow: var(--shadow-sm);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.attachment:hover .attachment-delete,
+.attachment:focus-within .attachment-delete,
+.attachment[data-selected='true'] .attachment-delete {
+  opacity: 1;
+}
+
+.attachment-delete:hover {
+  border-color: transparent;
+  background: var(--danger);
+  color: #fff;
+}
+
+@media (hover: none) {
+  .attachment-delete {
+    opacity: 1;
+  }
+}
+
+/* ---------- Menú de emojis ---------- */
+.emoji-menu {
+  width: min(300px, calc(100vw - 16px));
+  max-height: min(320px, 50dvh);
+  padding: 4px;
+}
+
+.emoji-option {
+  gap: 10px;
+  min-height: 36px;
+  font-size: 14px;
+}
+
+.emoji-option[aria-selected='true'] {
+  background: var(--accent-soft);
+}
+
+.emoji-glyph {
+  flex: none;
+  width: 24px;
+  font-size: 20px;
+  line-height: 1;
+  text-align: center;
+}
+
+.emoji-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
