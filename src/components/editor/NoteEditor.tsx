@@ -14,7 +14,7 @@ import {
   updateNote,
   useApp,
 } from '../../state/store'
-import { canOpenUrl, insertFiles, registerLiveEditor } from './attachment'
+import { canOpenLink, insertFiles, registerLiveEditor } from './attachment'
 import { EmojiMenu, EmojiMenuController, emojiSuggestionKey } from './EmojiMenu'
 import { createExtensions } from './extensions'
 import { FormatToolbar } from './FormatToolbar'
@@ -180,7 +180,7 @@ function EditorScreen({ noteId }: { noteId: string }) {
           const link = (event.target as Element | null)?.closest?.('a[href]')
           if (!(link instanceof HTMLAnchorElement)) return false
           event.preventDefault()
-          if (canOpenUrl(link.href)) window.open(link.href, '_blank', 'noopener,noreferrer')
+          if (canOpenLink(link.href)) window.open(link.href, '_blank', 'noopener,noreferrer')
           return true
         },
       },

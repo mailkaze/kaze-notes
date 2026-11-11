@@ -207,7 +207,7 @@ test('if the editor code cannot load (e.g. after a deploy), the page reloads onc
   await expect(page.locator('.ProseMirror')).toHaveText('tortilla')
 })
 
-test('Cmd/Ctrl+click opens only web links from a note', async ({ page }) => {
+test('Cmd/Ctrl+click opens web, mail, phone and FTP links from a note, as before', async ({ page }) => {
   await newNote(page, 'Enlaces', 'x')
   await expect.poll(async () => (await storedNote(page, 'Enlaces'))?.content ?? '').toContain('x')
   const id = (await storedNote(page, 'Enlaces'))!.id
@@ -216,11 +216,13 @@ test('Cmd/Ctrl+click opens only web links from a note', async ({ page }) => {
     type: 'doc',
     content: [
       { type: 'paragraph', content: [link('servidor', 'ftp://example.com/archivo')] },
+      { type: 'paragraph', content: [link('correo', 'mailto:ana@example.com')] },
+      { type: 'paragraph', content: [link('telefono', 'tel:+34600000000')] },
       { type: 'paragraph', content: [link('web', 'https://example.com/')] },
     ],
   })
   await remoteChange(page, id, { content, preview: 'servidor web' })
-  await expect(page.locator('.ProseMirror a')).toHaveCount(2)
+  await expect(page.locator('.ProseMirror a')).toHaveCount(4)
   await page.evaluate(() => {
     const w = window as unknown as { __opened: string[] }
     w.__opened = []
@@ -231,7 +233,10 @@ test('Cmd/Ctrl+click opens only web links from a note', async ({ page }) => {
   })
   const opened = () => page.evaluate(() => (window as unknown as { __opened: string[] }).__opened)
 
-  await page.locator('.ProseMirror a', { hasText: 'servidor' }).click({ modifiers: [mod] })
-  await page.locator('.ProseMirror a', { hasText: 'web' }).click({ modifiers: [mod] })
-  await expect.poll(opened).toEqual(['https://example.com/'])
+  for (const text of ['servidor', 'correo', 'telefono', 'web']) {
+    await page.locator('.ProseMirror a', { hasText: text }).click({ modifiers: [mod] })
+  }
+  await expect
+    .poll(opened)
+    .toEqual(['ftp://example.com/archivo', 'mailto:ana@example.com', 'tel:+34600000000', 'https://example.com/'])
 })

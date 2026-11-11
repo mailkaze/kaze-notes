@@ -189,12 +189,13 @@ test('a copied attachment pasted in another note keeps its file; a fake one from
   expect(foreign).toMatchObject({ url: '', path: null, status: 'error' })
 })
 
-test('the toolbar opens web links but not script links', async ({ page }) => {
+test('the toolbar opens web and mail links but not script links', async ({ page }) => {
   const link = (text: string, href: string) => ({ type: 'text', text, marks: [{ type: 'link', attrs: { href } }] })
   const content = {
     type: 'doc',
     content: [
       { type: 'paragraph', content: [link('web', 'https://example.com/')] },
+      { type: 'paragraph', content: [link('correo', 'mailto:ana@example.com')] },
       { type: 'paragraph', content: [link('script', 'javascript:alert(1)')] },
     ],
   }
@@ -208,11 +209,15 @@ test('the toolbar opens web links but not script links', async ({ page }) => {
   await openLink.click()
   expect(await opened()).toEqual(['https://example.com/'])
 
+  await page.locator('.ProseMirror a', { hasText: 'correo' }).click()
+  await openLink.click()
+  expect(await opened()).toEqual(['https://example.com/', 'mailto:ana@example.com'])
+
   await page.locator('.ProseMirror a', { hasText: 'script' }).click()
   await expect(page.locator('.ProseMirror a', { hasText: 'script' })).toBeVisible()
   await page.waitForTimeout(200)
   await expect(openLink).toHaveCount(0)
-  expect(await opened()).toEqual(['https://example.com/'])
+  expect(await opened()).toEqual(['https://example.com/', 'mailto:ana@example.com'])
 })
 
 test('two folders moved into each other from two devices stay in the sidebar, at the top level', async ({ page }) => {

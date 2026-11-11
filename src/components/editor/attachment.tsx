@@ -77,6 +77,18 @@ export function canOpenUrl(url: string): boolean {
   }
 }
 
+// Los mismos protocolos que el enlace de TipTap admite por defecto: nunca "javascript:" ni "data:".
+const LINK_PROTOCOLS = ['https:', 'http:', 'ftp:', 'ftps:', 'mailto:', 'tel:', 'callto:', 'sms:', 'cid:', 'xmpp:']
+
+/** Enlaces del texto que se pueden abrir: web, correo, teléfono… */
+export function canOpenLink(url: string): boolean {
+  try {
+    return LINK_PROTOCOLS.includes(new URL(url).protocol)
+  } catch {
+    return false
+  }
+}
+
 function dataAttr(name: string, parse: (value: string | null) => unknown = (v) => v ?? '') {
   return {
     parseHTML: (element: HTMLElement) => parse(element.getAttribute(`data-${name}`)),
