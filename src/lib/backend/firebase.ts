@@ -114,8 +114,6 @@ export function createFirebaseBackend(): Backend {
   const storage = getStorage(app)
   // Esta pestaña está cerrando la sesión (no se recarga al verla cerrada: borra antes la caché).
   let signingOut = false
-  // Al abrir la app, sin sesión y antes de usar Firestore, se termina de borrar lo que quedó al cerrarla.
-  if (isClearPending()) clearIndexedDbPersistence(db).then(() => setClearPending(false), () => undefined)
 
   const userCol = (uid: string, name: 'notes' | 'folders') => collection(db, 'users', uid, name)
 
@@ -129,6 +127,12 @@ export function createFirebaseBackend(): Backend {
         if (signedIn && !u && !signingOut) {
           window.location.reload()
           return
+        }
+        // Caché que no se pudo borrar al cerrar sesión: se borra solo sin sesión (aún sin usar Firestore). Con
+        // sesión ya es la de esa cuenta y puede tener cambios sin enviar: nunca se borra.
+        if (isClearPending()) {
+          if (u) setClearPending(false)
+          else clearIndexedDbPersistence(db).then(() => setClearPending(false), () => undefined)
         }
         signedIn = Boolean(u)
         cb(u ? { uid: u.uid, name: u.displayName, email: u.email, photoURL: u.photoURL } : null)
