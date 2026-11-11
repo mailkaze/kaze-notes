@@ -68,7 +68,8 @@ async function storageFile(event) {
   const cached = await cache.match(event.request)
   if (cached) return cached
   const response = await fetch(event.request)
-  // Nunca se guarda un error: se serviría para siempre.
+  // Nunca se guarda un error conocido: se serviría siempre. Las respuestas opacas (de <img>) no dicen si lo son: un
+  // fallo así sale de la caché con los 100 ficheros siguientes o al cerrar sesión.
   if (response.ok || response.type === 'opaque') event.waitUntil(keepFile(cache, event.request, response.clone()))
   return response
 }

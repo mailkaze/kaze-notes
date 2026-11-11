@@ -19,16 +19,23 @@ function serviceWorker(): Plugin {
           return { path: relative(outDir, file).split(sep).join('/'), content: readFileSync(file) }
         })
       const template = readFileSync(new URL('./src/pwa/sw.js', import.meta.url), 'utf8')
-      writeFileSync(join(outDir, 'sw.js'), renderServiceWorker(template, shellManifest(files)))
+      // Las cabeceras de Hosting entran en la versión: un cambio solo de la CSP también llega a los dispositivos.
+      const headers = JSON.stringify(readFirebaseConfig().hosting.headers)
+      writeFileSync(join(outDir, 'sw.js'), renderServiceWorker(template, shellManifest(files, headers)))
     },
   }
 }
 
+type HostingHeaders = { source: string; headers: { key: string; value: string }[] }[]
+
+function readFirebaseConfig(): { hosting: { headers: HostingHeaders } } {
+  return JSON.parse(readFileSync(new URL('./firebase.json', import.meta.url), 'utf8'))
+}
+
 /** Cabeceras que Firebase Hosting envía con la página de la app (firebase.json): `vite preview` las imita. */
 function appPageHeaders(): Record<string, string> {
-  const config = JSON.parse(readFileSync(new URL('./firebase.json', import.meta.url), 'utf8'))
-  const rule = config.hosting.headers.find((r: { source: string }) => r.source === '/')
-  return Object.fromEntries(rule.headers.map((h: { key: string; value: string }) => [h.key, h.value]))
+  const rule = readFirebaseConfig().hosting.headers.find((r) => r.source === '/')!
+  return Object.fromEntries(rule.headers.map((h) => [h.key, h.value]))
 }
 
 export default defineConfig({

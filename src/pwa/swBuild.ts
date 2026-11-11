@@ -21,10 +21,13 @@ function isShellFile(path: string): boolean {
   return !path.endsWith('.map') && path !== 'sw.js' && !path.split('/').some((part) => part.startsWith('.'))
 }
 
-/** URLs de todo lo que la app necesita sin conexión y una versión que cambia si cambia cualquier fichero. */
-export function shellManifest(files: BuiltFile[]): ShellManifest {
+/**
+ * URLs de todo lo que la app necesita sin conexión y una versión que cambia si cambia cualquier fichero o `headers`
+ * (las cabeceras con las que se sirve la app: el service worker las guarda con su copia, p. ej. la CSP).
+ */
+export function shellManifest(files: BuiltFile[], headers = ''): ShellManifest {
   const shell = files.filter((file) => isShellFile(file.path)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-  const hash = createHash('sha256')
+  const hash = createHash('sha256').update(headers).update('\0')
   for (const file of shell) hash.update(file.path).update('\0').update(file.content).update('\0')
   return { urls: shell.map((file) => `/${file.path}`), version: hash.digest('hex').slice(0, 16) }
 }

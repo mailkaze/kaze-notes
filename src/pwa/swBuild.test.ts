@@ -43,6 +43,12 @@ describe('shellManifest', () => {
 })
 
 describe('renderServiceWorker', () => {
+  it('changes the version when only the headers served with the app change (e.g. the CSP), with the same files', () => {
+    const csp = (value: string) => JSON.stringify([{ source: '/', headers: [{ key: 'Content-Security-Policy', value }] }])
+    expect(shellManifest(BUILD, csp("default-src 'self'")).version).not.toBe(shellManifest(BUILD, csp("default-src 'none'")).version)
+    expect(shellManifest(BUILD, csp("default-src 'self'")).version).toBe(shellManifest(BUILD, csp("default-src 'self'")).version)
+  })
+
   it('writes a different worker whenever the build output differs', () => {
     const a = renderServiceWorker(TEMPLATE, shellManifest(BUILD))
     const b = renderServiceWorker(TEMPLATE, shellManifest([...BUILD, { path: 'assets/new-f6.js', content: 'new' }]))
