@@ -76,15 +76,38 @@ service cloud.firestore {
         && removesMe('invited') && removesMe('members') && onlyMyPrefs();
     }
 
-    // Las notas compartidas conmigo, también las pendientes de aceptar (consultas de grupo incluidas). Acceso directo
-    // a los campos para que Firestore pueda comprobar las consultas `array-contains`; si falta uno, vale el otro.
+    // Las notas compartidas conmigo, solo después de aceptar (consultas de grupo incluidas). Acceso directo al campo
+    // para que Firestore pueda comprobar las consultas `array-contains`.
     match /{path=**}/notes/{noteId} {
-      allow read: if isAllowed() && (me() in resource.data.members || me() in resource.data.invited);
+      allow read: if isAllowed() && me() in resource.data.members;
     }
 
     // Nadie más que el dueño crea o borra la nota.
     match /users/{uid}/notes/{noteId} {
       allow update: if isAllowed() && request.auth.uid != uid && (editsShared() || accepts() || leaves());
+    }
+
+    // ---------- Invitaciones ----------
+    // `invites/{dueño}:{nota}:{correo}` solo dice quién invita y a qué nota, sin nada de su contenido: el invitado no
+    // puede leer la nota hasta aceptar. La leen el invitado y el dueño; la crea el dueño (con su propio correo) y la
+    // borran ellos dos al aceptar, rechazar o retirarla. No se modifica.
+
+    function validInvite(id, data) {
+      return data.keys().hasOnly(['ownerUid', 'ownerEmail', 'noteId', 'email', 'createdAt'])
+        && data.ownerUid == request.auth.uid
+        && data.ownerEmail == me()
+        && data.noteId is string
+        && data.email is string
+        && id == data.ownerUid + ':' + data.noteId + ':' + data.email
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/notes/$(data.noteId));
+    }
+
+    match /invites/{inviteId} {
+      allow read: if isAllowed() && (resource.data.email == me() || resource.data.ownerUid == request.auth.uid);
+      allow create: if isAllowed() && validInvite(inviteId, request.resource.data);
+      // Borrar una que ya no existe (al dejar una nota ya aceptada) no cambia nada.
+      allow delete: if isAllowed()
+        && (resource == null || resource.data.email == me() || resource.data.ownerUid == request.auth.uid);
     }
   }
 }

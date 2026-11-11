@@ -22,7 +22,6 @@ import {
   persistentMultipleTabManager,
   query,
   terminate,
-  updateDoc,
   waitForPendingWrites,
   where,
   writeBatch,
@@ -134,6 +133,8 @@ export function createFirebaseBackend(): Backend {
 
   const userCol = (uid: string, name: 'notes' | 'folders') => collection(db, 'users', uid, name)
   const noteDoc = (uid: string, noteId: string) => doc(db, 'users', uid, 'notes', noteId)
+  // Invitación pendiente: solo dice quién invita y a qué nota (el invitado no puede leer la nota hasta aceptar).
+  const inviteDoc = (ownerUid: string, noteId: string, email: string) => doc(db, 'invites', `${ownerUid}:${noteId}:${email}`)
 
   return {
     kind: 'firebase',
@@ -237,9 +238,8 @@ export function createFirebaseBackend(): Backend {
 
     subscribeShared(uid, email, handlers) {
       const onError = (error: Error) => handlers.error(error)
-      const shared = (field: 'members' | 'invited') => query(collectionGroup(db, 'notes'), where(field, 'array-contains', email))
       const unsubNotes = onSnapshot(
-        shared('members'),
+        query(collectionGroup(db, 'notes'), where('members', 'array-contains', email)),
         { includeMetadataChanges: true },
         (snap) =>
           handlers.notes(
@@ -251,15 +251,19 @@ export function createFirebaseBackend(): Backend {
         onError,
       )
       const unsubInvites = onSnapshot(
-        shared('invited'),
+        query(collection(db, 'invites'), where('email', '==', email)),
         (snap) =>
           handlers.invites(
             snap.docs
-              .filter((d) => ownerOf(d) !== uid && d.data().trashed !== true)
               .map((d): Invite => {
-                const ownerEmail = d.data().ownerEmail
-                return { noteId: d.id, ownerUid: ownerOf(d), ownerEmail: typeof ownerEmail === 'string' ? ownerEmail : '' }
-              }),
+                const { noteId, ownerUid, ownerEmail } = d.data()
+                return {
+                  noteId: typeof noteId === 'string' ? noteId : '',
+                  ownerUid: typeof ownerUid === 'string' ? ownerUid : '',
+                  ownerEmail: typeof ownerEmail === 'string' ? ownerEmail : '',
+                }
+              })
+              .filter((i) => i.noteId && i.ownerUid && i.ownerUid !== uid),
           ),
         onError,
       )
@@ -269,13 +273,18 @@ export function createFirebaseBackend(): Backend {
       }
     },
 
+    // La nota y su invitación cambian juntas, en un mismo lote.
     async share(uid, noteId, ownerEmail, email) {
-      await updateDoc(noteDoc(uid, noteId), { ownerEmail, invited: arrayUnion(email) })
+      const batch = writeBatch(db)
+      batch.set(inviteDoc(uid, noteId, email), { ownerUid: uid, ownerEmail, noteId, email, createdAt: Date.now() })
+      batch.update(noteDoc(uid, noteId), { ownerEmail, invited: arrayUnion(email) })
+      await batch.commit()
     },
 
     async acceptShare(ownerUid, noteId, email, prefs) {
+      const batch = writeBatch(db)
       // Las claves de `prefs` son correos (llevan puntos): van como ruta de campo, no como texto con puntos.
-      await updateDoc(
+      batch.update(
         noteDoc(ownerUid, noteId),
         new FieldPath('prefs', email),
         prefs,
@@ -284,10 +293,13 @@ export function createFirebaseBackend(): Backend {
         'members',
         arrayUnion(email),
       )
+      batch.delete(inviteDoc(ownerUid, noteId, email))
+      await batch.commit()
     },
 
     async removeShare(ownerUid, noteId, email) {
-      await updateDoc(
+      const batch = writeBatch(db)
+      batch.update(
         noteDoc(ownerUid, noteId),
         new FieldPath('prefs', email),
         deleteField(),
@@ -296,6 +308,9 @@ export function createFirebaseBackend(): Backend {
         'members',
         arrayRemove(email),
       )
+      // Si ya no estaba pendiente (había aceptado), no hay invitación y borrarla no hace nada.
+      batch.delete(inviteDoc(ownerUid, noteId, email))
+      await batch.commit()
     },
 
     newId() {

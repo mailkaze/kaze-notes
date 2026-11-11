@@ -860,6 +860,22 @@ describe('sharing my notes', () => {
     expect(fake.backend.share).not.toHaveBeenCalled()
   })
 
+  it('deleting a note forever, or emptying the trash, withdraws its pending invitations', async () => {
+    lastHandlers().notes(
+      [note('n1', { invited: ['bob@example.com'], trashed: true }), note('n2', { invited: ['c@example.com'], trashed: true })],
+      meta,
+    )
+    deleteNoteForever('n1')
+    expect(fake.backend.removeShare).toHaveBeenCalledWith('u1', 'n1', 'bob@example.com')
+    emptyTrash()
+    expect(fake.backend.removeShare).toHaveBeenCalledWith('u1', 'n2', 'c@example.com')
+    await settle()
+    expect(writtenOps()).toEqual([
+      { type: 'deleteNote', id: 'n1' },
+      { type: 'deleteNote', id: 'n2' },
+    ])
+  })
+
   it('stops sharing with one person', () => {
     lastHandlers().notes([note('n1', { members: ['bob@example.com'] })], meta)
     stopSharing('n1', 'bob@example.com')

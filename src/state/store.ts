@@ -973,12 +973,20 @@ function forgetTooLarge(ids: string[]) {
   if (ids.some((id) => list.includes(id))) setLasting({ tooLarge: list.filter((id) => !ids.includes(id)) })
 }
 
+/** Retira las invitaciones pendientes de unas notas mías antes de borrarlas: no quedan avisos de notas que no existen. */
+function withdrawInvites(ids: string[]) {
+  const { user, notes } = get()
+  if (!user || !backend) return
+  for (const id of ids) for (const email of notes[id]?.invited ?? []) sendShare(backend.removeShare(user.uid, id, email))
+}
+
 /** Borra la nota y sus ficheros, salvo los que otras notas siguen usando (adjuntos copiados). */
 export function deleteNoteForever(id: string) {
   // Solo su dueño borra una nota compartida (y sus ficheros, que están en la cuenta de quien los subió).
   if (foreignOwner(id)) return
   const user = get().user
   const keep = referencedPaths(id)
+  withdrawInvites([id])
   commit([{ type: 'deleteNote', id }])
   forgetTooLarge([id])
   if (user && backend) void backend.deleteNoteFiles(user.uid, id, keep)
@@ -987,6 +995,7 @@ export function deleteNoteForever(id: string) {
 export function emptyTrash() {
   const user = get().user
   const ids = trashedNotes(get().notes).map((n) => n.id)
+  withdrawInvites(ids)
   commit(ids.map((id) => ({ type: 'deleteNote' as const, id })))
   forgetTooLarge(ids)
   // Ya sin las notas borradas: solo se conservan los ficheros que usan las que quedan.
