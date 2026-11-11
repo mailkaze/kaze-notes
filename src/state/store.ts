@@ -246,8 +246,9 @@ function keepOverwritten(prev: Record<string, Note>, list: Note[]) {
   for (const note of list) {
     const old = prev[note.id]
     if (!old || !note.device || note.device === deviceId || note.baseRev === undefined) continue
-    // Misma marca que ya había: guardado de una versión antigua de la app o cambio solo de metadatos.
-    if (note.device === old.device && note.rev === old.rev) continue
+    // El mismo dispositivo sustituye su propia versión (o la marca no cambió: versión antigua de la app o
+    // cambio solo de metadatos).
+    if (note.device === old.device) continue
     if (note.baseRev >= (old.rev ?? 0)) continue
     if (note.title === old.title && note.content === old.content) continue
     // También con cambios sin guardar en el editor: su `flush` solo conserva los campos editados aquí.
@@ -525,8 +526,11 @@ export function updateNote(id: string, patch: Partial<Pick<Note, 'title' | 'cont
     if (tooLarge) return false
   }
   // La revisión de la que parte permite a los demás dispositivos ver si este guardado pisa uno que no conocía.
-  const baseRev = note.rev ?? 0
-  commit([{ type: 'setNote', id, data: { ...patch, baseRev, rev: baseRev + 1, device: deviceId, updatedAt: Date.now() } }])
+  // Es la última versión vista de otro dispositivo, igual en todos los guardados seguidos de esta página
+  // (también sin conexión): así no importa cuántas veces se guardó en cada lado.
+  const baseRev = note.device === deviceId ? (note.baseRev ?? 0) : (note.rev ?? 0)
+  const rev = (note.rev ?? 0) + 1
+  commit([{ type: 'setNote', id, data: { ...patch, baseRev, rev, device: deviceId, updatedAt: Date.now() } }])
   return true
 }
 

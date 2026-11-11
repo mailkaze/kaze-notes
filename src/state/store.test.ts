@@ -167,13 +167,51 @@ describe('edits overwritten by another device', () => {
     await settle()
     const [first, second, other, ...metadata] = writtenData()
     expect(first).toMatchObject({ title: 'T', baseRev: 3, rev: 4, device: expect.any(String) })
-    expect(second).toMatchObject({ baseRev: 4, rev: 5, device: first.device })
+    // Los guardados seguidos de esta página parten de la misma versión: la última que vio de otro dispositivo.
+    expect(second).toMatchObject({ baseRev: 3, rev: 5, device: first.device })
     expect(other).toMatchObject({ baseRev: 0, rev: 1, device: first.device })
     expect(metadata).toHaveLength(3)
     for (const data of metadata) {
       for (const key of ['rev', 'baseRev', 'device']) expect(data).not.toHaveProperty(key)
     }
-    expect(useApp.getState().notes.a).toMatchObject({ rev: 5, baseRev: 4, device: first.device })
+    expect(useApp.getState().notes.a).toMatchObject({ rev: 5, baseRev: 3, device: first.device })
+  })
+
+  it('every save in a row from this page keeps the base it started from, so an offline chain shows what it missed', async () => {
+    setNotes(note('a', { rev: 3 }))
+    updateNote('a', { title: 'T1' })
+    updateNote('a', { title: 'T2' })
+    updateNote('a', { title: 'T3' })
+    await settle()
+    expect(writtenData().map((d) => [d.baseRev, d.rev])).toEqual([
+      [3, 4],
+      [3, 5],
+      [3, 6],
+    ])
+  })
+
+  it('a save after a version from another device starts from that version', async () => {
+    setNotes(note('a', { rev: 7, baseRev: 3, device: 'tablet' }))
+    updateNote('a', { title: 'T' })
+    await settle()
+    expect(writtenData()[0]).toMatchObject({ baseRev: 7, rev: 8 })
+  })
+
+  it('makes no copy when a device replaces its own earlier version', () => {
+    const a = note('a', { content: mine, rev: 6, baseRev: 5, device: 'tablet' })
+    lastHandlers().notes([a], meta)
+    lastHandlers().notes([{ ...a, content: theirs, rev: 8, baseRev: 5 }], meta)
+    expect(fake.backend.write).not.toHaveBeenCalled()
+  })
+
+  it('keeps the version saved here when another device that saved more times offline replaces it', () => {
+    setNotes(note('a', { content: doc(text('base')), rev: 5 }))
+    updateNote('a', { content: mine })
+    const here = useApp.getState().notes.a
+    // La tableta guardó cuatro veces sin conexión partiendo de la revisión 5; aquí solo se guardó una.
+    lastHandlers().notes([{ ...here, content: theirs, rev: 9, baseRev: 5, device: 'tablet' }], meta)
+    const copies = Object.values(useApp.getState().notes).filter((n) => n.id !== 'a')
+    expect(copies.map((n) => n.content)).toEqual([mine])
   })
 
   it('keeps the version that a write based on an older revision replaced as a conflict copy next to the note', () => {
