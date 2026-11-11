@@ -48,6 +48,7 @@ Recommended: in Google Cloud Console → *APIs & Services → Credentials*, rest
 | `npm test` | Unit tests (Vitest) |
 | `npm run test:e2e` | End-to-end tests (Playwright, in-browser backend) |
 | `npm run test:e2e:offline` | Offline tests on a production-style build with the in-browser backend, served with the production CSP (built into `dist-e2e`, never `dist`) |
+| `npm run test:rules` | Firestore security rules tests (`rules-tests/`) on the Firestore emulator with a `demo-` project (no cloud access). Needs Java 21+ on `PATH`; on macOS `brew install openjdk` and add `/opt/homebrew/opt/openjdk/bin` to `PATH` |
 | `OWNER_EMAIL=… npm run rules:deploy` | Generate the security rules for the allowed account(s) and deploy them with the Firestore indexes |
 
 ## Offline

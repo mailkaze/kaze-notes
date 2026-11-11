@@ -12,10 +12,12 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:offline": "playwright test -c playwright.offline.config.ts",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-kaze-notes \"vitest run -c vitest.rules.config.ts\"",
     "rules:build": "node scripts/build-rules.mjs",
     "rules:deploy": "node scripts/build-rules.mjs && firebase deploy --only firestore:rules,firestore:indexes,storage"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
     "@playwright/test": "^1.65.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

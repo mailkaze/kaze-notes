@@ -17,3 +17,7 @@ storage.rules
 
 # Documentos de trabajo locales
 odd/
+
+# Logs del emulador de Firebase (npm run test:rules)
+firestore-debug.log
+firebase-debug.log
