@@ -598,3 +598,8 @@ button {
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
+
+/* Adjunto en la cola del dispositivo: la vista previa local, atenuada hasta que se suba. */
+.attachment[data-state='waiting'] img {
+  opacity: 0.65;
+}

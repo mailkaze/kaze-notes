@@ -6,6 +6,7 @@ import { verifyDeviceUser } from '../lib/deviceAuth'
 import { hasContent, parseContent, previewFromDoc } from '../lib/docText'
 import { t } from '../lib/i18n'
 import { keyBetween } from '../lib/order'
+import { pendingUploadCount } from '../lib/outbox'
 import { activeNotes, childFolders, descendantFolderIds, isInsideFolder, trashedNotes } from '../lib/tree'
 import type { AppUser, Folder, LayoutMode, Note, NoteColorId, ThemePref, View } from '../lib/types'
 
@@ -287,10 +288,14 @@ export function initApp() {
   if (initialized) return
   initialized = true
 
-  window.addEventListener('online', () => setSync({ online: true }))
+  window.addEventListener('online', () => {
+    setSync({ online: true })
+    resumeQueuedUploads()
+  })
   window.addEventListener('offline', () => setSync({ online: false }))
   window.addEventListener('pagehide', flushAll)
-  // Al cerrar la pestaña solo se pregunta si hay una subida en curso: el texto pendiente se guarda ya.
+  // Al cerrar la pestaña solo se pregunta si hay un fichero que aún no está a salvo en el dispositivo: el texto
+  // pendiente se guarda ya y los ficheros en cola se suben al volver.
   window.addEventListener('beforeunload', (event) => {
     flushAll()
     if (!get().sync.dirty.some((key) => key.startsWith(UPLOAD_KEY))) return
@@ -340,7 +345,10 @@ export function initApp() {
         serverPending: Boolean(notesMeta?.pendingWrites || foldersMeta?.pendingWrites),
         fromCache: Boolean(notesMeta?.fromCache || foldersMeta?.fromCache),
       })
-      if (notesMeta && foldersMeta && !get().dataReady) set({ dataReady: true })
+      if (notesMeta && foldersMeta && !get().dataReady) {
+        set({ dataReady: true })
+        resumeQueuedUploads()
+      }
     }
     const received = () => {
       if (get().sync.listenerError) setLasting({ listenerError: null })
@@ -685,10 +693,33 @@ export function emptyTrash() {
 
 export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
-// Prefijo de las claves de `sync.dirty` de las subidas en curso.
-const UPLOAD_KEY = 'upload:'
+// Claves de `sync.dirty` de los adjuntos sin subir (`<prefijo><id del adjunto>`). Con `upload:` el fichero aún
+// no está a salvo en el dispositivo (salir de la página lo perdería); con `queued:` espera en la cola del dispositivo.
+export const UPLOAD_KEY = 'upload:'
+export const QUEUED_UPLOAD_KEY = 'queued:'
 
-/** Sube un adjunto y marca la sincronización como pendiente mientras dura la subida. */
+// Fallos que no se arreglan reintentando: el adjunto queda como fallido.
+const PERMANENT_UPLOAD_ERRORS = new Set([
+  'too-large',
+  'storage/unauthorized',
+  'storage/quota-exceeded',
+  'storage/invalid-argument',
+  'storage/invalid-format',
+  'storage/invalid-checksum',
+  'storage/server-file-wrong-size',
+  'storage/cannot-slice-blob',
+  'storage/no-default-bucket',
+  'storage/bucket-not-found',
+  'storage/project-not-found',
+])
+
+/** true si la subida no saldrá bien aunque se reintente (los fallos de red y sin conexión sí se reintentan). */
+export function isPermanentUploadError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  return typeof code === 'string' && PERMANENT_UPLOAD_ERRORS.has(code)
+}
+
+/** Sube un adjunto. Solo un fallo definitivo se muestra como error: los de red esperan en la cola del dispositivo. */
 export async function uploadAttachment(
   noteId: string,
   file: File,
@@ -698,18 +729,31 @@ export async function uploadAttachment(
   if (!user || !backend) throw new Error('Not signed in')
   // Mismo límite que storage.rules.
   if (file.size >= MAX_UPLOAD_BYTES) {
-    throw new Error(t(`"${file.name}" is larger than 100 MB`, `"${file.name}" pesa más de 100 MB`))
+    const message = t(`"${file.name}" is larger than 100 MB`, `"${file.name}" pesa más de 100 MB`)
+    throw Object.assign(new Error(message), { code: 'too-large' })
   }
-  const key = `${UPLOAD_KEY}${backend.newId()}`
-  markDirty(key)
   try {
     return await backend.uploadFile(user.uid, noteId, file, onProgress)
   } catch (error) {
-    setSync({ error: error instanceof Error ? error.message : String(error) })
+    if (isPermanentUploadError(error)) setSync({ error: error instanceof Error ? error.message : String(error) })
     throw error
-  } finally {
-    markClean(key)
   }
+}
+
+/**
+ * Reanuda las subidas en cola de este dispositivo (al tener los datos del usuario y al volver la conexión).
+ * El módulo de adjuntos va con el editor: solo se carga si hay algo que subir.
+ */
+function resumeQueuedUploads() {
+  const { user, dataReady } = get()
+  if (!user || !dataReady) return
+  pendingUploadCount(user.uid)
+    .then(async (count) => {
+      if (count === 0) return
+      const { resumeUploads } = await import('../components/editor/attachment')
+      resumeUploads()
+    })
+    .catch(() => undefined)
 }
 
 /**

@@ -193,12 +193,17 @@ export function createFirebaseBackend(): Backend {
     },
 
     uploadFile(uid, noteId, file, onProgress) {
+      // Sin conexión falla al momento en vez de reintentar durante minutos: el fichero espera en la cola.
+      if (!navigator.onLine) return Promise.reject(Object.assign(new Error('Offline'), { code: 'offline' }))
       const path = uploadPath(uid, noteId, file.name)
       const task = uploadBytesResumable(ref(storage, path), file, {
         contentType: file.type || 'application/octet-stream',
         contentDisposition: `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`,
       })
-      return new Promise((resolve, reject) => {
+      // Si se pierde la conexión a mitad, se cancela y se reintenta al volver.
+      const cancel = () => task.cancel()
+      window.addEventListener('offline', cancel)
+      return new Promise<{ url: string; path: string }>((resolve, reject) => {
         task.on(
           'state_changed',
           (s) => onProgress?.(s.totalBytes ? s.bytesTransferred / s.totalBytes : 0),
@@ -211,7 +216,7 @@ export function createFirebaseBackend(): Backend {
             }
           },
         )
-      })
+      }).finally(() => window.removeEventListener('offline', cancel))
     },
 
     async deleteNoteFiles(uid, noteId, keep) {

@@ -46,7 +46,10 @@ import {
   deleteNoteForever,
   emptyTrash,
   initApp,
+  isPermanentUploadError,
   markDirty,
+  MAX_UPLOAD_BYTES,
+  QUEUED_UPLOAD_KEY,
   referencedPaths,
   registerFlush,
   renameFolder,
@@ -56,6 +59,8 @@ import {
   setPinned,
   signIn,
   updateNote,
+  UPLOAD_KEY,
+  uploadAttachment,
   useApp,
 } from './store'
 
@@ -531,5 +536,47 @@ describe('sync errors', () => {
     fake.state.auth?.(null)
     await vi.advanceTimersByTimeAsync(15_000)
     expect(fake.backend.subscribe).toHaveBeenCalledTimes(subscriptions)
+  })
+})
+
+describe('attachment uploads', () => {
+  const pdf = (size = 9) => {
+    const file = new File(['contenido'], 'billete.pdf', { type: 'application/pdf' })
+    Object.defineProperty(file, 'size', { value: size })
+    return file
+  }
+  const failure = (code: string) => Object.assign(new Error(code), { code })
+
+  it('a network failure is not a sync error (the file waits in the device queue); a refused file is', async () => {
+    fake.backend.uploadFile.mockRejectedValueOnce(failure('storage/retry-limit-exceeded'))
+    await expect(uploadAttachment('n1', pdf())).rejects.toThrow()
+    expect(useApp.getState().sync.error).toBeNull()
+
+    fake.backend.uploadFile.mockRejectedValueOnce(failure('storage/unauthorized'))
+    await expect(uploadAttachment('n1', pdf())).rejects.toThrow()
+    expect(useApp.getState().sync.error).toBe('storage/unauthorized')
+  })
+
+  it('refuses a file of 100 MB or more as a permanent failure, without uploading it', async () => {
+    const error = await uploadAttachment('n1', pdf(MAX_UPLOAD_BYTES)).catch((e: unknown) => e)
+    expect(isPermanentUploadError(error)).toBe(true)
+    expect(isPermanentUploadError(failure('storage/retry-limit-exceeded'))).toBe(false)
+    expect(isPermanentUploadError(failure('offline'))).toBe(false)
+    expect(fake.backend.uploadFile).not.toHaveBeenCalled()
+  })
+
+  it('leaving the page asks only while a file is not yet safe on this device', () => {
+    const leavingAsks = () => !window.dispatchEvent(new Event('beforeunload', { cancelable: true }))
+    markDirty(`${QUEUED_UPLOAD_KEY}a1`)
+    expect(leavingAsks()).toBe(false)
+    markDirty(`${UPLOAD_KEY}a2`)
+    expect(leavingAsks()).toBe(true)
+  })
+
+  it('files waiting in the device queue show as syncing, or offline without connection', () => {
+    markDirty(`${QUEUED_UPLOAD_KEY}a1`)
+    expect(selectSyncStatus(useApp.getState())).toBe('syncing')
+    useApp.setState((s) => ({ sync: { ...s.sync, online: false } }))
+    expect(selectSyncStatus(useApp.getState())).toBe('offline')
   })
 })

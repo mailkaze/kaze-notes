@@ -20,7 +20,19 @@ import {
 import { useState, useSyncExternalStore, type MouseEvent } from 'react'
 import { parseContent } from '../../lib/docText'
 import { t } from '../../lib/i18n'
-import { deleteAttachmentFile, updateNote, uploadAttachment, useApp } from '../../state/store'
+import { deleteUpload, getUpload, listUploads, saveUpload, type OutboxEntry } from '../../lib/outbox'
+import {
+  deleteAttachmentFile,
+  isPermanentUploadError,
+  markClean,
+  markDirty,
+  MAX_UPLOAD_BYTES,
+  QUEUED_UPLOAD_KEY,
+  updateNote,
+  UPLOAD_KEY,
+  uploadAttachment,
+  useApp,
+} from '../../state/store'
 import { confirmDialog } from '../ui/confirm'
 
 export type AttachmentStatus = 'uploading' | 'done' | 'error'
@@ -48,6 +60,13 @@ function setProgress(id: string, fraction: number | null) {
   if (fraction === null) progress.delete(id)
   else progress.set(id, fraction)
   progressListeners.forEach((fn) => fn())
+}
+
+/** Marca el adjunto como en subida en esta pestaña (o lo desmarca) y avisa a su vista. */
+function setUploading(id: string, active: boolean) {
+  if (active) uploading.add(id)
+  else uploading.delete(id)
+  setProgress(id, active ? (progress.get(id) ?? 0) : null)
 }
 
 function subscribeProgress(fn: () => void) {
@@ -223,6 +242,8 @@ export async function deleteAttachment(view: EditorView, attrs: AttachmentAttrs)
     const found = findAttachment(view, attrs.id)
     if (found) view.dispatch(view.state.tr.delete(found.pos, found.pos + found.node.nodeSize).setMeta('addToHistory', false))
   }
+  // Un fichero que esperaba en la cola de este dispositivo ya no se sube.
+  if (attrs.status === 'uploading') void deleteUpload(attrs.id).then(() => forget(attrs.id))
   // Un error deja el aviso en el indicador de sincronización.
   await deleteAttachmentFile(attrs.path ?? '', noteId).catch(() => undefined)
 }
@@ -231,19 +252,27 @@ function AttachmentView({ node, selected, editor }: ReactNodeViewProps) {
   const attrs = node.attrs as AttachmentAttrs
   const { id, url, name, mime, size, status } = attrs
   const [broken, setBroken] = useState(false)
-  const fraction = useSyncExternalStore(subscribeProgress, () => progress.get(id) ?? 0)
-  // Una subida interrumpida (p. ej. se recargó la página) se muestra como error.
-  const active = status === 'uploading' && uploading.has(id)
-  const failed = status === 'error' || (status === 'uploading' && !active)
+  // -1 si esta pestaña no lo está subiendo.
+  const fraction = useSyncExternalStore(subscribeProgress, () => (uploading.has(id) ? (progress.get(id) ?? 0) : -1))
+  // El fichero espera en la cola de este dispositivo.
+  const local = useApp(
+    (s) => status === 'uploading' && s.sync.dirty.some((key) => key === `${UPLOAD_KEY}${id}` || key === `${QUEUED_UPLOAD_KEY}${id}`),
+  )
+  const active = status === 'uploading' && fraction >= 0
+  const failed = status === 'error'
   const src = status === 'done' && url ? url : previews.get(id)
   const showImage = mime.startsWith('image/') && Boolean(src) && !broken
   const Icon = fileIcon(mime, name)
-  const state = failed ? 'error' : active ? 'uploading' : 'done'
-  const title = failed
-    ? `${name} — ${t('Upload failed', 'No se ha podido subir')}`
-    : active
-      ? `${name} — ${t('Uploading…', 'Subiendo…')}`
-      : `${name} — ${t('Open in a new tab', 'Abrir en una pestaña nueva')}`
+  // Sin copia aquí ni subida en curso: puede estar en la cola de otro dispositivo.
+  const state = failed ? 'error' : active ? 'uploading' : status !== 'uploading' ? 'done' : local ? 'waiting' : 'pending'
+  const notice = {
+    error: t('Upload failed', 'Error al subir'),
+    uploading: t('Uploading…', 'Subiendo…'),
+    waiting: t('Waiting for connection', 'Esperando conexión'),
+    pending: t('Pending upload', 'Pendiente de subir'),
+    done: t('Open in a new tab', 'Abrir en una pestaña nueva'),
+  }[state]
+  const title = `${name} — ${state === 'error' ? t('Upload failed', 'No se ha podido subir') : notice}`
 
   const open = (event: MouseEvent) => {
     event.preventDefault()
@@ -266,7 +295,9 @@ function AttachmentView({ node, selected, editor }: ReactNodeViewProps) {
         <span className="attachment-text">
           <span className="attachment-name">{name}</span>
           {failed ? (
-            <span className="attachment-meta attachment-error">{t('Upload failed', 'Error al subir')}</span>
+            <span className="attachment-meta attachment-error">{notice}</span>
+          ) : state === 'waiting' || state === 'pending' ? (
+            <span className="attachment-meta">{notice}</span>
           ) : (
             !showImage && size > 0 && <span className="attachment-meta">{formatSize(size)}</span>
           )}
@@ -347,26 +378,168 @@ function preload(url: string): Promise<void> {
   })
 }
 
-async function upload(noteId: string, id: string, file: File) {
+/** Olvida el fichero local de un adjunto: ya subido, fallido o descartado. */
+function forget(id: string) {
+  markClean(`${UPLOAD_KEY}${id}`)
+  markClean(`${QUEUED_UPLOAD_KEY}${id}`)
+  const blob = previews.get(id)
+  previews.delete(id)
+  if (blob) URL.revokeObjectURL(blob)
+}
+
+/**
+ * Sube el fichero y aplica el resultado al adjunto. `stored` es la escritura en la cola del dispositivo (null si
+ * no está en ella): un fallo de red lo deja en la cola para reintentarlo; uno definitivo lo marca como fallido.
+ */
+async function upload(noteId: string, id: string, file: File, stored: Promise<unknown> | null) {
+  setUploading(id, true)
   try {
     const { url, path } = await uploadAttachment(noteId, file, (fraction) => setProgress(id, fraction))
     if (previews.has(id)) await preload(url)
-    uploading.delete(id)
     patchAttachment(noteId, id, { url, path, status: 'done' })
-  } catch {
-    uploading.delete(id)
+  } catch (error) {
+    if (stored && !isPermanentUploadError(error)) {
+      if (useApp.getState().sync.online) retryLater()
+      return
+    }
     patchAttachment(noteId, id, { status: 'error' })
   } finally {
-    setProgress(id, null)
-    const blob = previews.get(id)
-    previews.delete(id)
-    if (blob) URL.revokeObjectURL(blob)
+    setUploading(id, false)
   }
+  // Se borra de la cola después de haberse guardado en ella.
+  if (stored) await stored.then(() => deleteUpload(id))
+  forget(id)
+}
+
+/** Ejecuta `fn` salvo que otra pestaña ya esté subiendo ese fichero. */
+function exclusive(id: string, fn: () => Promise<void>): Promise<void> {
+  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks
+  if (!locks) return fn()
+  return locks.request(`kaze-upload:${id}`, { ifAvailable: true }, (lock) => (lock ? fn() : undefined))
+}
+
+/** Guarda el fichero en la cola del dispositivo y lo sube si hay conexión. */
+function queueUpload(noteId: string, id: string, file: File) {
+  const uid = useApp.getState().user?.uid
+  // Sin sesión o demasiado grande no se guarda: la subida falla al momento y lo marca como fallido.
+  if (!uid || file.size >= MAX_UPLOAD_BYTES) {
+    void upload(noteId, id, file, null)
+    return
+  }
+  markDirty(`${UPLOAD_KEY}${id}`)
+  const entry = { id, uid, noteId, blob: file, name: file.name, type: file.type, size: file.size, createdAt: Date.now() }
+  const stored = saveUpload(entry).then((safe) => {
+    // Ya a salvo en el dispositivo: salir de la página no lo pierde.
+    if (safe && useApp.getState().sync.dirty.includes(`${UPLOAD_KEY}${id}`)) {
+      markClean(`${UPLOAD_KEY}${id}`)
+      markDirty(`${QUEUED_UPLOAD_KEY}${id}`)
+    }
+  })
+  if (!useApp.getState().sync.online) return
+  // Sin esperar a la cola: así empieza antes.
+  setUploading(id, true)
+  void exclusive(id, () => upload(noteId, id, file, stored)).finally(() => setUploading(id, false))
+}
+
+// ---------- Cola de subidas ----------
+
+// Tras un fallo de red con conexión se reintenta pasado este tiempo.
+const RETRY_MS = 30_000
+let retryTimer: ReturnType<typeof setTimeout> | undefined
+let running: Promise<void> | null = null
+let runAgain = false
+
+function retryLater() {
+  if (retryTimer) return
+  retryTimer = setTimeout(() => {
+    retryTimer = undefined
+    resumeUploads()
+  }, RETRY_MS)
+}
+
+/** Estado guardado de un adjunto (en el editor abierto o en la nota). null si ya no está o la nota no existe. */
+function attachmentStatus(noteId: string, id: string): AttachmentStatus | null {
+  const editor = liveEditors.get(noteId)
+  if (editor && !editor.isDestroyed) return (findAttachment(editor.view, id)?.node.attrs.status as AttachmentStatus) ?? null
+  const note = useApp.getState().notes[noteId]
+  const doc = note ? parseContent(note.content) : null
+  let status: AttachmentStatus | null = null
+  const walk = (node: JSONContent) => {
+    if (node.type === 'attachment' && node.attrs?.id === id) status = node.attrs.status as AttachmentStatus
+    node.content?.forEach(walk)
+  }
+  if (doc) walk(doc)
+  return status
+}
+
+/** Recuerda un fichero de la cola: pendiente en la sincronización y con su vista previa. */
+function remember(entry: OutboxEntry) {
+  if (entry.type.startsWith('image/') && !previews.has(entry.id)) previews.set(entry.id, URL.createObjectURL(entry.blob))
+  if (!useApp.getState().sync.dirty.includes(`${UPLOAD_KEY}${entry.id}`)) markDirty(`${QUEUED_UPLOAD_KEY}${entry.id}`)
+}
+
+async function sendQueued(entry: OutboxEntry) {
+  // Otra pestaña puede haberlo subido ya, y el adjunto puede ya no estar en su nota (o la nota no existir).
+  const current = await getUpload(entry.id)
+  const status = attachmentStatus(entry.noteId, entry.id)
+  // Con datos aún sin confirmar por el servidor, que falte la nota no basta para descartar el fichero.
+  if (current && status === null && useApp.getState().sync.fromCache) {
+    retryLater()
+    return
+  }
+  if (!current || status !== 'uploading') {
+    await deleteUpload(entry.id)
+    forget(entry.id)
+    return
+  }
+  // `File` aquí es el icono: se usa el constructor global.
+  const file = new globalThis.File([current.blob], current.name, { type: current.type })
+  await upload(current.noteId, current.id, file, Promise.resolve())
+}
+
+async function runQueue() {
+  const uid = useApp.getState().user?.uid
+  if (!uid) return
+  const entries = await listUploads(uid)
+  // También sin conexión: así se ven como pendientes, con su vista previa.
+  entries.forEach(remember)
+  const canUpload = () => {
+    const { user, dataReady, sync } = useApp.getState()
+    return user?.uid === uid && dataReady && sync.online
+  }
+  if (!canUpload()) return
+  // De uno en uno; los que esperan turno ya se muestran subiendo.
+  const turn = entries.filter((entry) => !uploading.has(entry.id))
+  turn.forEach((entry) => setUploading(entry.id, true))
+  for (const entry of turn) {
+    try {
+      if (canUpload()) await exclusive(entry.id, () => sendQueued(entry))
+    } finally {
+      setUploading(entry.id, false)
+    }
+  }
+}
+
+/** Sube los ficheros en cola de este dispositivo para el usuario actual. Nunca hay dos pasadas a la vez. */
+export function resumeUploads() {
+  if (running) {
+    runAgain = true
+    return
+  }
+  running = runQueue()
+    .catch(() => undefined)
+    .finally(() => {
+      running = null
+      if (runAgain) {
+        runAgain = false
+        resumeUploads()
+      }
+    })
 }
 
 /**
  * Inserta los ficheros como adjuntos en `pos` (punto donde se soltaron) o en la selección,
- * y los sube a la nube.
+ * los guarda en la cola del dispositivo y los sube a la nube.
  */
 export function insertFiles(view: EditorView, noteId: string, files: File[], pos?: number) {
   const type = view.state.schema.nodes.attachment
@@ -374,7 +547,6 @@ export function insertFiles(view: EditorView, noteId: string, files: File[], pos
   const items = files.map((file) => {
     const id = newId()
     const mime = file.type
-    uploading.add(id)
     if (mime.startsWith('image/')) previews.set(id, URL.createObjectURL(file))
     const attrs: AttachmentAttrs = { id, url: '', path: null, name: file.name, mime, size: file.size, status: 'uploading' }
     return { id, file, node: type.create(attrs) }
@@ -390,5 +562,5 @@ export function insertFiles(view: EditorView, noteId: string, files: File[], pos
   }
   view.dispatch(tr.scrollIntoView())
   view.focus()
-  items.forEach(({ id, file }) => void upload(noteId, id, file))
+  items.forEach(({ id, file }) => queueUpload(noteId, id, file))
 }

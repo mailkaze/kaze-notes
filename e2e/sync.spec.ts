@@ -214,40 +214,9 @@ test('an edit from another device that started from the last version saved here 
   expect((await storedNotes(page)).map((n) => n.title)).toEqual(['Plan'])
 })
 
-/** Sustituye la subida de ficheros por una que tarda `ms` milisegundos. */
-async function slowUploads(page: Page, ms: number) {
-  await page.evaluate(async (ms) => {
-    const url = '/src/lib/backend/index.ts'
-    const { backend } = await import(/* @vite-ignore */ url)
-    backend.uploadFile = (uid: string, noteId: string, file: File, onProgress?: (fraction: number) => void) =>
-      new Promise((resolve) =>
-        setTimeout(() => {
-          onProgress?.(1)
-          resolve({ url: `https://files.example/${encodeURIComponent(file.name)}`, path: `users/${uid}/notes/${noteId}/${file.name}` })
-        }, ms),
-      )
-  }, ms)
-}
-
-test('closing the tab during an upload asks first; pending text alone does not ask and is saved', async ({ page }) => {
-  await slowUploads(page, 3000)
+// Las subidas ya no preguntan al cerrar: el fichero queda guardado en el dispositivo (e2e/attachments-offline.spec.ts).
+test('closing the tab with pending text does not ask, and the text is saved', async ({ page }) => {
   await newNote(page, 'Planos', 'casa ')
-  await page.locator('.note-editor input[type="file"]').setInputFiles({
-    name: 'plano.pdf',
-    mimeType: 'application/pdf',
-    buffer: Buffer.from('%PDF-1.4'),
-  })
-  const attachment = page.locator('.ProseMirror .attachment')
-  await expect(attachment).toHaveAttribute('data-state', 'uploading')
-
-  const asked = page.waitForEvent('dialog')
-  await page.close({ runBeforeUnload: true })
-  const dialog = await asked
-  expect(dialog.type()).toBe('beforeunload')
-  await dialog.dismiss()
-
-  // Sin subidas en curso, cerrar no pregunta aunque haya texto sin guardar, que se guarda al salir.
-  await expect(attachment).toHaveAttribute('data-state', 'done')
   await page.locator('.ProseMirror').click()
   await page.keyboard.press(`${mod}+End`)
   await page.keyboard.type(' y garaje')
