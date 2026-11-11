@@ -110,6 +110,15 @@ describe('owner (unchanged behavior)', () => {
     await assertSucceeds(deleteDoc(noteRef(ana)))
   })
 
+  it("the inviter's email on a note is always the owner's own (an invitation cannot pretend to come from someone else)", async () => {
+    await seed({ invited: [], members: [] })
+    const ana = as(ANA)
+    await assertFails(updateDoc(noteRef(ana), { ownerEmail: BOB.email, invited: arrayUnion(CAROL.email) }))
+    await assertFails(setDoc(noteRef(ana, ANA.uid, 'n2'), { title: 'x', ownerEmail: BOB.email, invited: [CAROL.email] }))
+    await assertSucceeds(setDoc(noteRef(ana, ANA.uid, 'n3'), { title: 'x' }))
+    await assertSucceeds(setDoc(doc(ana.firestore(), 'users', ANA.uid, 'folders', 'f2'), { name: 'Work' }))
+  })
+
   it('an unverified email or an account outside the allowlist gets nothing, not even its own data', async () => {
     await seed({ invited: [], members: [] })
     await assertFails(getDoc(noteRef(as(ANA, false))))

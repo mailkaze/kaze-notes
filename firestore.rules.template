@@ -16,7 +16,10 @@ service cloud.firestore {
 
     // Todo lo demás queda denegado por defecto.
     match /users/{uid}/{document=**} {
-      allow read, write: if isOwner(uid);
+      allow read: if isOwner(uid);
+      // El correo de dueño de una nota (el remitente que ven los invitados) solo puede ser el propio.
+      allow write: if isOwner(uid)
+        && (request.resource == null || request.resource.data.get('ownerEmail', me()) == me());
     }
 
     // ---------- Notas compartidas ----------
