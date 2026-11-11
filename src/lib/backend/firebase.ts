@@ -305,14 +305,18 @@ export function createFirebaseBackend(): Backend {
     async write(uid, ops: WriteOp[]) {
       // Todos los lotes se envían a la vez: sin conexión quedan todos en cola, no solo el primero.
       const commits: Promise<void>[] = []
-      for (let i = 0; i < ops.length; i += BATCH_LIMIT) {
+      // Un cambio en una nota compartida conmigo va a la nota de su dueño (`prefs` se fusiona por correo) y en su
+      // propio lote: si se rechaza (p. ej. ya no está compartida), no arrastra el resto de cambios.
+      for (const op of ops) {
+        if (op.type !== 'setSharedNote') continue
         const batch = writeBatch(db)
-        for (const op of ops.slice(i, i + BATCH_LIMIT)) {
-          // Los cambios en una nota compartida conmigo van a la nota de su dueño; `prefs` se fusiona por correo.
-          if (op.type === 'setSharedNote') {
-            batch.set(noteDoc(op.owner, op.id), op.data, { merge: true })
-            continue
-          }
+        batch.set(noteDoc(op.owner, op.id), op.data, { merge: true })
+        commits.push(batch.commit())
+      }
+      const own = ops.filter((op) => op.type !== 'setSharedNote')
+      for (let i = 0; i < own.length; i += BATCH_LIMIT) {
+        const batch = writeBatch(db)
+        for (const op of own.slice(i, i + BATCH_LIMIT)) {
           const col = op.type === 'setNote' || op.type === 'deleteNote' ? 'notes' : 'folders'
           const target = doc(userCol(uid, col), op.id)
           if (op.type === 'setNote' || op.type === 'setFolder') batch.set(target, op.data, { merge: true })

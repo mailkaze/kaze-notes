@@ -14,6 +14,7 @@ const USER_KEY = 'kaze:memory-user'
 const AS_KEY = 'kaze:memory-as'
 const LATENCY_MS = 350
 const DEMO_UID = 'local'
+const DEMO_EMAIL = 'demo@local'
 
 // Las notas y carpetas se guardan por su id; las que no son de la cuenta de demostración llevan su dueño.
 type StoredNote = Note & { owner?: string; prefs?: Record<string, SharePrefs> }
@@ -51,7 +52,7 @@ function persist(db: Db) {
   }
 }
 
-const demoUser: AppUser = { uid: DEMO_UID, name: 'Demo', email: 'demo@local', photoURL: null }
+const demoUser: AppUser = { uid: DEMO_UID, name: 'Demo', email: DEMO_EMAIL, photoURL: null }
 
 /** Cuenta con la que entra esta pestaña: la de `?as=nombre` (recordada en la pestaña) o la de demostración. */
 function tabUser(): AppUser {
@@ -67,6 +68,7 @@ function tabUser(): AppUser {
 }
 
 const ownerOf = (item: { owner?: string }) => item.owner ?? DEMO_UID
+const emailOf = (uid: string) => (uid === DEMO_UID ? DEMO_EMAIL : `${uid}@local`)
 
 /** La nota tal y como la ve su dueño (sin los datos internos del almacén). */
 function plainNote(stored: StoredNote): Note {
@@ -138,19 +140,28 @@ export function createMemoryBackend(): Backend {
     return note && ownerOf(note) === ownerUid ? note : null
   }
 
+  // Cada cuenta escribe solo en lo suyo (en Firestore son rutas distintas): lo de otra cuenta con el mismo id no se toca.
   const setNote = (uid: string, id: string, data: Partial<Note>) => {
     const old = db.notes[id]
+    if (old && ownerOf(old) !== uid) return
     db.notes[id] = { ...old, ...data, id, ...(uid !== DEMO_UID && { owner: uid }) } as StoredNote
   }
 
-  const setSharedNote = (owner: string, id: string, data: SharedNoteData) => {
+  const setFolder = (uid: string, id: string, data: Partial<Folder>) => {
+    const old = db.folders[id]
+    if (old && ownerOf(old) !== uid) return
+    db.folders[id] = { ...old, ...data, id, ...(uid !== DEMO_UID && { owner: uid }) } as StoredFolder
+  }
+
+  /** Como las reglas: solo un miembro cambia la nota compartida, y no puede crearla si ya no existe. false si se rechaza. */
+  const setSharedNote = (uid: string, owner: string, id: string, data: SharedNoteData): boolean => {
     const old = noteOf(owner, id)
-    // Igual que Firestore: un invitado no puede crear la nota si ya no existe.
-    if (!old) return
+    if (!old?.members?.includes(emailOf(uid))) return false
     const { prefs, ...rest } = data
     const merged = { ...old.prefs }
     for (const [email, value] of Object.entries(prefs ?? {})) merged[email] = { ...merged[email], ...value }
     db.notes[id] = { ...old, ...rest, ...(prefs && { prefs: merged }) }
+    return true
   }
 
   return {
@@ -251,16 +262,21 @@ export function createMemoryBackend(): Backend {
     },
 
     write(uid, ops: WriteOp[]) {
-      return change(() => {
+      // Como en Firebase, cada cambio en una nota compartida va aparte: si se rechaza, lo demás se guarda igual.
+      let refused = false
+      const done = change(() => {
         for (const op of ops) {
           if (op.type === 'setNote') setNote(uid, op.id, op.data)
-          else if (op.type === 'setSharedNote') setSharedNote(op.owner, op.id, op.data)
-          else if (op.type === 'deleteNote') delete db.notes[op.id]
-          else if (op.type === 'setFolder') {
-            db.folders[op.id] = { ...db.folders[op.id], ...op.data, id: op.id, ...(uid !== DEMO_UID && { owner: uid }) } as StoredFolder
-          } else delete db.folders[op.id]
+          else if (op.type === 'setSharedNote') refused = !setSharedNote(uid, op.owner, op.id, op.data) || refused
+          else if (op.type === 'deleteNote') {
+            if (db.notes[op.id] && ownerOf(db.notes[op.id]) === uid) delete db.notes[op.id]
+          } else if (op.type === 'setFolder') setFolder(uid, op.id, op.data)
+          else if (db.folders[op.id] && ownerOf(db.folders[op.id]) === uid) delete db.folders[op.id]
         }
       })
+      return refused
+        ? done.then(() => Promise.reject(new Error('Missing or insufficient permissions.')))
+        : done
     },
 
     uploadFile(uid, noteId, file, onProgress) {

@@ -28,6 +28,13 @@ describe('memory backend sharing between two accounts', () => {
     sessionStorage.clear()
   })
 
+  // La cuenta recordada con ?as= y la sesión no pasan a otras pruebas.
+  afterEach(() => {
+    window.history.replaceState({}, '', '/')
+    localStorage.clear()
+    sessionStorage.clear()
+  })
+
   function watch(backend: ReturnType<typeof createMemoryBackend>, uid: string, email: string) {
     const seen = { own: [] as Note[], folders: [] as Folder[], shared: [] as Note[], invites: [] as Invite[] }
     backend.subscribe(uid, {
@@ -75,6 +82,42 @@ describe('memory backend sharing between two accounts', () => {
     const stored = JSON.parse(localStorage.getItem('kaze:memory-db') ?? '{}')
     // Las notas de la cuenta de demostración siguen guardadas por su id, como antes.
     expect(stored.notes.n1.prefs).toEqual({})
+  })
+
+  it("refuses, like the rules, a shared write from someone who is not a member, while the writer's own changes still apply", async () => {
+    const backend = createMemoryBackend()
+    const ana = watch(backend, 'local', 'demo@local')
+    const bob = watch(backend, 'bob', 'bob@local')
+    await Promise.resolve()
+    void backend.write('local', [{ type: 'setNote', id: 'n1', data: fullNote('Groceries') }])
+    const write = backend.write('bob', [
+      { type: 'setNote', id: 'b1', data: fullNote('Bob only') },
+      { type: 'setSharedNote', owner: 'local', id: 'n1', data: { title: 'Hijacked' } },
+      { type: 'setSharedNote', owner: 'local', id: 'gone', data: { title: 'Ghost' } },
+    ])
+    await expect(write).rejects.toThrow(/permission/i)
+    expect(ana.own.map((n) => n.title)).toEqual(['Groceries'])
+    expect(bob.own.map((n) => n.title)).toEqual(['Bob only'])
+  })
+
+  it("never lets one account overwrite or delete another account's note or folder through its own writes", async () => {
+    const backend = createMemoryBackend()
+    const ana = watch(backend, 'local', 'demo@local')
+    await Promise.resolve()
+    void backend.write('local', [
+      { type: 'setNote', id: 'n1', data: fullNote('Groceries') },
+      { type: 'setFolder', id: 'f1', data: { name: 'Home', parentId: null, order: 'a0', createdAt: 1, updatedAt: 1 } },
+    ])
+    void backend.write('bob', [
+      { type: 'setNote', id: 'n1', data: { title: 'Taken' } },
+      { type: 'setFolder', id: 'f1', data: { name: 'Taken' } },
+    ])
+    void backend.write('bob', [
+      { type: 'deleteNote', id: 'n1' },
+      { type: 'deleteFolder', id: 'f1' },
+    ])
+    expect(ana.own.map((n) => n.title)).toEqual(['Groceries'])
+    expect(ana.folders.map((f) => f.name)).toEqual(['Home'])
   })
 
   it('signs in as another account with ?as=name and keeps it on reload of the same tab', async () => {
