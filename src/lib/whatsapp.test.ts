@@ -207,14 +207,32 @@ describe('hasFormattingHtml', () => {
 })
 
 describe('long lines', () => {
-  it('detects and converts a long line full of opening markers quickly, with the same result', () => {
+  it('detects and converts a long line full of opening markers with the same result', () => {
     const unclosed = ' *a'.repeat(16_000)
     const bold = `${unclosed}*`
-    const started = performance.now()
     expect(looksLikeWhatsApp(unclosed)).toBe(false)
     expect(whatsAppToHtml(unclosed)).toBe(`<p>${unclosed}</p>`)
     expect(looksLikeWhatsApp(bold)).toBe(true)
     expect(whatsAppToHtml(bold)).toBe(`<p> <strong>a${unclosed.slice(3)}</strong></p>`)
-    expect(performance.now() - started).toBeLessThan(1000)
+  }, 60_000)
+
+  it('takes time proportional to the line length, not to its square', () => {
+    // Se compara el tiempo con una línea cuatro veces más larga: lineal ≈ ×4, cuadrático ≈ ×16.
+    // La proporción no depende de lo rápida que sea la máquina; el mejor de varios intentos quita el ruido.
+    const timeFor = (repeats: number) => {
+      const unclosed = ' *a'.repeat(repeats)
+      const bold = `${unclosed}*`
+      let best = Infinity
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const started = performance.now()
+        looksLikeWhatsApp(unclosed)
+        whatsAppToHtml(unclosed)
+        looksLikeWhatsApp(bold)
+        whatsAppToHtml(bold)
+        best = Math.min(best, performance.now() - started)
+      }
+      return best
+    }
+    expect(timeFor(32_000) / timeFor(8_000)).toBeLessThan(10)
   }, 60_000)
 })
