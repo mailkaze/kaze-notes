@@ -2,7 +2,17 @@ import { FolderPlus, Inbox, LogOut, PanelLeftClose, SquarePen, Trash } from 'luc
 import { useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { t } from '../../lib/i18n'
 import type { AppUser } from '../../lib/types'
-import { createFolder, createNote, openFolder, openTrash, setSidebarWidth, signOut, useApp } from '../../state/store'
+import {
+  createFolder,
+  createNote,
+  hasUnsyncedChanges,
+  openFolder,
+  openTrash,
+  setSidebarWidth,
+  signOut,
+  useApp,
+} from '../../state/store'
+import { confirmDialog } from '../ui/confirm'
 import { hideSidebar, ThemeToggle } from '../ui/controls'
 import { SidebarTree } from './SidebarTree'
 import './sidebar.css'
@@ -24,6 +34,23 @@ function Avatar({ user }: { user: AppUser }) {
 }
 
 /** Asa para cambiar el ancho de la barra (solo en pantallas anchas; el CSS la oculta en el cajón). */
+/** Cierra la sesión; si queda algo sin sincronizar, pregunta antes porque se borraría de este dispositivo. */
+async function confirmSignOut() {
+  if (await hasUnsyncedChanges()) {
+    const ok = await confirmDialog({
+      title: t('There are changes not synced yet', 'Hay cambios sin sincronizar'),
+      message: t(
+        'Some changes or files have not reached the cloud yet. Signing out removes them from this device and they will be lost. To keep them, cancel, connect to the internet and wait until everything is synced.',
+        'Algunos cambios o archivos aún no han llegado a la nube. Al cerrar sesión se borran de este dispositivo y se perderán. Para conservarlos, cancela, conéctate a internet y espera a que se sincronice todo.',
+      ),
+      confirmLabel: t('Sign out and delete them', 'Cerrar sesión y borrarlos'),
+      danger: true,
+    })
+    if (!ok) return
+  }
+  await signOut()
+}
+
 function Resizer() {
   const width = useApp((s) => s.sidebarWidth)
 
@@ -160,7 +187,7 @@ export function Sidebar() {
             className="icon-btn"
             title={t('Sign out', 'Cerrar sesión')}
             aria-label={t('Sign out', 'Cerrar sesión')}
-            onClick={() => void signOut()}
+            onClick={() => void confirmSignOut()}
           >
             <LogOut size={18} />
           </button>

@@ -369,3 +369,75 @@ test('Cmd/Ctrl+click opens web, mail, phone and FTP links from a note, as before
     .poll(opened)
     .toEqual(['ftp://example.com/archivo', 'mailto:ana@example.com', 'tel:+34600000000', 'https://example.com/'])
 })
+
+// ---------- Cerrar sesión ----------
+
+const signOutButton = (page: Page) => page.locator('.sidebar').getByRole('button', { name: 'Cerrar sesión' })
+const loginButton = (page: Page) => page.getByRole('button', { name: /Google/ })
+const rejectedKeys = (page: Page) =>
+  page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('kaze:rejected:')))
+
+test('signing out with everything synced does not ask, and keeps the interface preferences', async ({ page }) => {
+  await newNote(page, 'Compra', 'pan')
+  await expect.poll(async () => (await storedNote(page, 'Compra'))?.content ?? '').toContain('pan')
+  await backToNotes(page)
+  const layout = await page.evaluate(() => localStorage.getItem('kaze:layout'))
+  await signOutButton(page).click()
+  await expect(loginButton(page)).toBeVisible()
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
+  expect(await page.evaluate(() => localStorage.getItem('kaze:layout'))).toBe(layout)
+})
+
+test('signing out with changes not synced asks first: cancelling keeps them, confirming removes them from the device', async ({
+  page,
+}) => {
+  await newNote(page, 'Presupuesto', 'base')
+  await expect.poll(async () => (await storedNote(page, 'Presupuesto'))?.content ?? '').toContain('base')
+  await rejectTextWith(page, 'RECHAZO')
+  await page.keyboard.type(' RECHAZO')
+  await expect(rejectedNotice(page)).toBeVisible()
+  await backToNotes(page)
+
+  await signOutButton(page).click()
+  const dialog = page.getByRole('alertdialog')
+  await expect(dialog).toContainText('sin sincronizar')
+  await dialog.getByRole('button', { name: 'Cancelar' }).click()
+  await expect(page.locator('.sidebar')).toBeVisible()
+  expect(await rejectedKeys(page)).toHaveLength(1)
+
+  await signOutButton(page).click()
+  await dialog.getByRole('button', { name: 'Cerrar sesión y borrarlos' }).click()
+  await expect(loginButton(page)).toBeVisible()
+  expect(await rejectedKeys(page)).toEqual([])
+})
+
+test('signing out removes the files waiting to upload from this device', async ({ page, context }) => {
+  await newNote(page, 'Planos', 'casa')
+  await context.setOffline(true)
+  await expect(page.getByTestId('sync-indicator')).toHaveAttribute('data-status', 'offline')
+  await page.locator('.note-editor input[type="file"]').setInputFiles({
+    name: 'plano.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from('%PDF-1.4'),
+  })
+  await expect(page.locator('.ProseMirror .attachment')).toHaveAttribute('data-state', 'waiting')
+  await backToNotes(page)
+
+  await signOutButton(page).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Cerrar sesión y borrarlos' }).click()
+  await expect(loginButton(page)).toBeVisible()
+  const queued = await page.evaluate(
+    () =>
+      new Promise<number>((resolve, reject) => {
+        const open = indexedDB.open('kaze-outbox')
+        open.onerror = () => reject(open.error)
+        open.onsuccess = () => {
+          const db = open.result
+          if (!db.objectStoreNames.contains('uploads')) return resolve(0)
+          const count = db.transaction('uploads').objectStore('uploads').count()
+          count.onsuccess = () => resolve(count.result)
+        }
+      }),
+  )
+  expect(queued).toBe(0)
+})

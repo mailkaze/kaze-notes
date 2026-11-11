@@ -79,8 +79,9 @@ function toFolder(id: string, d: DocumentData): Folder {
 
 // Firestore admite como máximo 500 operaciones por lote.
 const BATCH_LIMIT = 450
-// Tiempo máximo que se esperan las escrituras pendientes antes de cerrar sesión.
-const SIGN_OUT_WAIT_MS = 5000
+// Al cerrar sesión se reintenta borrar la caché local mientras las demás pestañas la sueltan.
+const CLEAR_ATTEMPTS = 6
+const CLEAR_RETRY_MS = 500
 
 export function createFirebaseBackend(): Backend {
   const { config, missing } = readFirebaseConfig()
@@ -92,6 +93,8 @@ export function createFirebaseBackend(): Backend {
     localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
   })
   const storage = getStorage(app)
+  // Esta pestaña está cerrando la sesión (no se recarga al verla cerrada: borra antes la caché).
+  let signingOut = false
 
   const userCol = (uid: string, name: 'notes' | 'folders') => collection(db, 'users', uid, name)
 
@@ -99,9 +102,16 @@ export function createFirebaseBackend(): Backend {
     kind: 'firebase',
 
     onAuthChange(cb) {
-      return onAuthStateChanged(auth, (u) =>
-        cb(u ? { uid: u.uid, name: u.displayName, email: u.email, photoURL: u.photoURL } : null),
-      )
+      let signedIn = false
+      return onAuthStateChanged(auth, (u) => {
+        // Sesión cerrada en otra pestaña: se recarga para soltar la caché local, que esa pestaña borra.
+        if (signedIn && !u && !signingOut) {
+          window.location.reload()
+          return
+        }
+        signedIn = Boolean(u)
+        cb(u ? { uid: u.uid, name: u.displayName, email: u.email, photoURL: u.photoURL } : null)
+      })
     },
 
     async signIn() {
@@ -122,26 +132,31 @@ export function createFirebaseBackend(): Backend {
     },
 
     async signOut() {
-      // Se espera un poco a que se envíen las escrituras pendientes.
-      const synced = await Promise.race([
+      // Lo que quede sin enviar ya lo ha aceptado perder quien cierra la sesión (la app pregunta antes).
+      signingOut = true
+      await signOut(auth)
+      // Que no queden notas en este dispositivo. Las demás pestañas se recargan al ver la sesión cerrada
+      // y dejan libre la caché: se reintenta mientras tanto.
+      await terminate(db).catch(() => undefined)
+      for (let attempt = 0; attempt < CLEAR_ATTEMPTS; attempt++) {
+        try {
+          await clearIndexedDbPersistence(db)
+          break
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, CLEAR_RETRY_MS))
+        }
+      }
+      window.location.reload()
+    },
+
+    waitForSync(timeoutMs) {
+      return Promise.race([
         waitForPendingWrites(db).then(
           () => true,
           () => false,
         ),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), SIGN_OUT_WAIT_MS)),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
       ])
-      await signOut(auth)
-      // Que no queden notas en este dispositivo, salvo si hay cambios sin subir: entonces se conserva
-      // la caché para que se envíen al volver a entrar, en lugar de perderlos.
-      if (synced) {
-        try {
-          await terminate(db)
-          await clearIndexedDbPersistence(db)
-        } catch {
-          // Ignorado (p. ej. otra pestaña sigue usando la caché).
-        }
-      }
-      window.location.reload()
     },
 
     subscribe(uid, handlers) {

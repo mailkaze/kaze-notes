@@ -22,7 +22,10 @@ export interface Backend {
   readonly kind: 'firebase' | 'memory'
   onAuthChange(cb: (user: AppUser | null) => void): () => void
   signIn(): Promise<void>
+  /** Cierra la sesión y borra de este dispositivo la copia local de los datos. */
   signOut(): Promise<void>
+  /** Espera como mucho `timeoutMs` a que la nube confirme las escrituras pendientes; false si quedan. */
+  waitForSync(timeoutMs: number): Promise<boolean>
   subscribe(
     uid: string,
     handlers: {

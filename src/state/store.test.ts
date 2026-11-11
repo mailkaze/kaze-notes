@@ -22,6 +22,7 @@ const fake = vi.hoisted(() => {
     },
     signIn: vi.fn(async () => undefined),
     signOut: vi.fn(async () => undefined),
+    waitForSync: vi.fn(async (_ms: number) => true),
     subscribe: vi.fn((_uid: string, handlers: Handlers) => {
       state.handlers.push(handlers)
       return () => undefined
@@ -46,6 +47,7 @@ import {
   deleteNoteForever,
   discardRejected,
   emptyTrash,
+  hasUnsyncedChanges,
   initApp,
   isPermanentUploadError,
   markDirty,
@@ -655,5 +657,13 @@ describe('text the cloud rejects', () => {
     lastHandlers().notes([note('n1', { rev: 5, baseRev: 3, device: 'other-device' })], meta)
     await settle()
     expect(writtenOps()).toEqual([])
+  })
+})
+
+describe('signing out', () => {
+  it('reports changes not synced while the cloud has not confirmed every write', async () => {
+    expect(await hasUnsyncedChanges()).toBe(false)
+    fake.backend.waitForSync.mockResolvedValueOnce(false)
+    expect(await hasUnsyncedChanges()).toBe(true)
   })
 })

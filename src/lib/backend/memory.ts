@@ -76,6 +76,12 @@ export function createMemoryBackend(): Backend {
       setUser(null)
     },
 
+    async waitForSync(timeoutMs) {
+      const end = Date.now() + timeoutMs
+      while (inFlight > 0 && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 50))
+      return inFlight === 0
+    },
+
     subscribe(_uid, handlers) {
       const listener = (meta: SnapshotMeta) => {
         handlers.notes(Object.values(db.notes), meta)

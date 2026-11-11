@@ -6,9 +6,10 @@ import { verifyDeviceUser } from '../lib/deviceAuth'
 import { hasContent, parseContent, previewFromDoc } from '../lib/docText'
 import { t } from '../lib/i18n'
 import { keyBetween } from '../lib/order'
-import { pendingUploadCount } from '../lib/outbox'
+import { deleteUpload, listUploads, pendingUploadCount } from '../lib/outbox'
 import { activeNotes, childFolders, descendantFolderIds, isInsideFolder, trashedNotes } from '../lib/tree'
 import type { AppUser, Folder, LayoutMode, Note, NoteColorId, ThemePref, View } from '../lib/types'
+import { clearCachedFiles } from '../pwa/registerServiceWorker'
 
 export interface SyncState {
   online: boolean
@@ -519,8 +520,38 @@ export async function signIn() {
   }
 }
 
+// Tiempo máximo que se espera a que la nube confirme lo pendiente antes de cerrar sesión.
+const SIGN_OUT_WAIT_MS = 5000
+
+/**
+ * Envía lo pendiente y espera un poco a la nube. true si aún queda algo sin sincronizar en este dispositivo
+ * (escrituras sin confirmar, ficheros en cola o texto rechazado): cerrar sesión lo borraría.
+ */
+export async function hasUnsyncedChanges(): Promise<boolean> {
+  flushAll()
+  const { user } = get()
+  if (!user || !backend) return false
+  const synced = await backend.waitForSync(SIGN_OUT_WAIT_MS)
+  const queued = await pendingUploadCount(user.uid).catch(() => 0)
+  const { sync } = get()
+  return !synced || queued > 0 || Object.keys(sync.rejected).length > 0 || sync.dirty.some((key) => key.startsWith(UPLOAD_KEY))
+}
+
+/** Cierra la sesión y borra de este dispositivo los datos de la cuenta; las preferencias de la interfaz se quedan. */
 export async function signOut() {
   flushAll()
+  const { user } = get()
+  if (user) {
+    const uploads = await listUploads(user.uid).catch(() => [])
+    await Promise.all(uploads.map((entry) => deleteUpload(entry.id).catch(() => undefined)))
+    for (const id of Object.keys(storedRejected(user.uid))) writeRejected(user.uid, id, null)
+    await clearCachedFiles().catch(() => undefined)
+    try {
+      localStorage.removeItem('kaze:expandedFolders')
+    } catch {
+      // Sin almacenamiento local.
+    }
+  }
   await backend?.signOut()
 }
 
