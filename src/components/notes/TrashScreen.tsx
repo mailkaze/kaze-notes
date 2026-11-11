@@ -7,6 +7,7 @@ import type { Note } from '../../lib/types'
 import { deleteNoteForever, emptyTrash, restoreNote, useApp } from '../../state/store'
 import { confirmDialog } from '../ui/confirm'
 import { SidebarToggle } from '../ui/controls'
+import { InvitesBell } from '../ui/InvitesBell'
 import { SyncIndicator } from '../ui/SyncIndicator'
 import { previewLines } from '../sidebar/treeContext'
 import { useNarrow } from './useNarrow'
@@ -136,6 +137,7 @@ export function TrashScreen() {
           <Trash size={16} />
           <span className="trash-btn-label">{t('Empty trash', 'Vaciar papelera')}</span>
         </button>
+        <InvitesBell />
         <SyncIndicator compact={narrow} />
       </header>
       <div className="screen-body">

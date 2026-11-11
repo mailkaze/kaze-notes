@@ -52,8 +52,8 @@ describe('memory backend sharing between two accounts', () => {
 
   it('invites, accepts, syncs shared fields, keeps personal ones apart and unshares', async () => {
     const backend = createMemoryBackend()
-    const ana = watch(backend, 'local', 'demo@local')
-    const bob = watch(backend, 'bob', 'bob@local')
+    const ana = watch(backend, 'local', 'demo@local.test')
+    const bob = watch(backend, 'bob', 'bob@local.test')
     await Promise.resolve()
 
     void backend.write('local', [{ type: 'setNote', id: 'n1', data: fullNote('Groceries') }])
@@ -61,22 +61,22 @@ describe('memory backend sharing between two accounts', () => {
     expect(ana.own.map((n) => n.title)).toEqual(['Groceries'])
     expect(bob.own.map((n) => n.title)).toEqual(['Bob only'])
 
-    void backend.share('local', 'n1', 'demo@local', 'bob@local')
-    expect(bob.invites).toEqual([{ noteId: 'n1', ownerUid: 'local', ownerEmail: 'demo@local' }])
+    void backend.share('local', 'n1', 'demo@local.test', 'bob@local.test')
+    expect(bob.invites).toEqual([{ noteId: 'n1', ownerUid: 'local', ownerEmail: 'demo@local.test' }])
     expect(bob.shared).toEqual([])
 
-    void backend.acceptShare('local', 'n1', 'bob@local', { folderId: 'bf', order: 'a1', pinned: false, locked: false })
+    void backend.acceptShare('local', 'n1', 'bob@local.test', { folderId: 'bf', order: 'a1', pinned: false, locked: false })
     expect(bob.invites).toEqual([])
     expect(bob.shared).toMatchObject([{ id: 'n1', ownerUid: 'local', title: 'Groceries', folderId: 'bf' }])
-    expect(ana.own[0]).toMatchObject({ members: ['bob@local'], invited: [] })
+    expect(ana.own[0]).toMatchObject({ members: ['bob@local.test'], invited: [] })
 
-    const data = sharedWrite({ title: 'Groceries!', color: 'sky', pinned: true }, 'bob@local')
+    const data = sharedWrite({ title: 'Groceries!', color: 'sky', pinned: true }, 'bob@local.test')
     void backend.write('bob', [{ type: 'setSharedNote', owner: 'local', id: 'n1', data }])
     expect(ana.own[0]).toMatchObject({ title: 'Groceries!', color: 'sky', pinned: false, folderId: null })
     expect(bob.shared[0]).toMatchObject({ title: 'Groceries!', color: 'sky', pinned: true, folderId: 'bf' })
     expect(ana.own[0]).not.toHaveProperty('prefs')
 
-    void backend.removeShare('local', 'n1', 'bob@local')
+    void backend.removeShare('local', 'n1', 'bob@local.test')
     expect(bob.shared).toEqual([])
     expect(ana.own[0]).toMatchObject({ title: 'Groceries!', members: [] })
     const stored = JSON.parse(localStorage.getItem('kaze:memory-db') ?? '{}')
@@ -86,8 +86,8 @@ describe('memory backend sharing between two accounts', () => {
 
   it("refuses, like the rules, a shared write from someone who is not a member, while the writer's own changes still apply", async () => {
     const backend = createMemoryBackend()
-    const ana = watch(backend, 'local', 'demo@local')
-    const bob = watch(backend, 'bob', 'bob@local')
+    const ana = watch(backend, 'local', 'demo@local.test')
+    const bob = watch(backend, 'bob', 'bob@local.test')
     await Promise.resolve()
     void backend.write('local', [{ type: 'setNote', id: 'n1', data: fullNote('Groceries') }])
     const write = backend.write('bob', [
@@ -102,7 +102,7 @@ describe('memory backend sharing between two accounts', () => {
 
   it("never lets one account overwrite or delete another account's note or folder through its own writes", async () => {
     const backend = createMemoryBackend()
-    const ana = watch(backend, 'local', 'demo@local')
+    const ana = watch(backend, 'local', 'demo@local.test')
     await Promise.resolve()
     void backend.write('local', [
       { type: 'setNote', id: 'n1', data: fullNote('Groceries') },
@@ -126,12 +126,12 @@ describe('memory backend sharing between two accounts', () => {
     const backend = createMemoryBackend()
     backend.onAuthChange((u) => users.push(u))
     await backend.signIn()
-    expect(users.at(-1)).toMatchObject({ uid: 'bob', email: 'bob@local' })
+    expect(users.at(-1)).toMatchObject({ uid: 'bob', email: 'bob@local.test' })
     window.history.replaceState({}, '', '/')
     const again: (AppUser | null)[] = []
     createMemoryBackend().onAuthChange((u) => again.push(u))
     await Promise.resolve()
-    expect(again.at(-1)).toMatchObject({ uid: 'bob', email: 'bob@local' })
+    expect(again.at(-1)).toMatchObject({ uid: 'bob', email: 'bob@local.test' })
   })
 })
 

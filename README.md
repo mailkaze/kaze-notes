@@ -16,6 +16,8 @@ Without Firebase (data stays in this browser, for development and e2e tests):
 npm run dev:memory
 ```
 
+To try sharing with two accounts there, open a second tab at `/?as=bob`: it signs in as `bob@local.test` (the first tab is `demo@local.test`). Tabs of the same browser share the data and see each other's changes.
+
 ## Firebase setup (one time)
 
 1. **Authentication** → Sign-in method → enable **Google** (keep it as the only provider). Under *Settings → Authorized domains* add every domain that will serve the app (`localhost` is there by default; `<project-id>.web.app` and `<project-id>.firebaseapp.com` are added automatically).
@@ -26,13 +28,13 @@ npm run dev:memory
 ```bash
 npm install -g firebase-tools   # once
 firebase login
-OWNER_EMAIL=you@gmail.com npm run rules:deploy    # rules
+OWNER_EMAIL=you@gmail.com npm run rules:deploy    # rules and Firestore indexes
 firebase deploy --only hosting                    # app → https://<project-id>.web.app (builds it first)
 ```
 
 Deploys are guarded by `predeploy` hooks in `firebase.json`: a hosting deploy always runs `npm run build` first (so a test build never ships), and any deploy that includes the rules regenerates them from `OWNER_EMAIL`, so a plain `firebase deploy` without it stops instead of uploading stale local rules.
 
-The rules are generated from `firestore.rules.template` and `storage.rules.template` with `OWNER_EMAIL` (the generated `firestore.rules` / `storage.rules` are git-ignored). To let more people use the app, list every account comma-separated, e.g. `OWNER_EMAIL=you@gmail.com,friend@gmail.com`; each deploy replaces the previous list, so always pass all of them. Only those Google accounts, with a verified email, can read and write their own data under `users/{uid}` (nobody sees anyone else's notes), with a 100 MB limit per attachment. Any other account can sign in but gets permission errors. Attachments are displayed through Firebase download URLs, which carry an unguessable token: anyone who gets one of those URLs can open that file.
+The rules are generated from `firestore.rules.template` and `storage.rules.template` with `OWNER_EMAIL` (the generated `firestore.rules` / `storage.rules` are git-ignored). To let more people use the app, list every account comma-separated, e.g. `OWNER_EMAIL=you@gmail.com,friend@gmail.com`; each deploy replaces the previous list, so always pass all of them. Only those Google accounts, with a verified email, can read and write their own data under `users/{uid}` (nobody sees anyone else's notes unless they were shared with them, see [Sharing notes](#sharing-notes)), with a 100 MB limit per attachment. Any other account can sign in but gets permission errors. Attachments are displayed through Firebase download URLs, which carry an unguessable token: anyone who gets one of those URLs can open that file.
 
 Recommended: in Google Cloud Console → *APIs & Services → Credentials*, restrict the browser API key to your app's domains.
 
@@ -46,7 +48,7 @@ Recommended: in Google Cloud Console → *APIs & Services → Credentials*, rest
 | `npm test` | Unit tests (Vitest) |
 | `npm run test:e2e` | End-to-end tests (Playwright, in-browser backend) |
 | `npm run test:e2e:offline` | Offline tests on a production-style build with the in-browser backend, served with the production CSP (built into `dist-e2e`, never `dist`) |
-| `OWNER_EMAIL=… npm run rules:deploy` | Generate the security rules for the allowed account(s) and deploy them |
+| `OWNER_EMAIL=… npm run rules:deploy` | Generate the security rules for the allowed account(s) and deploy them with the Firestore indexes |
 
 ## Offline
 
@@ -85,10 +87,26 @@ The fingerprint button in a note's header protects it. A protected note shows on
 
 This only locks the interface. The content is still stored unencrypted in Firestore and in the browser's offline cache, so it does not protect against someone who has access to your account or to the device's browser data.
 
+## Sharing notes
+
+The share button in a note's header asks for another user's email. That person sees a bell in the top bar, and tapping it shows "The user … wants to share a note with you" with Accept and Reject. Only accounts allowed to use the app (see `OWNER_EMAIL`) can actually receive it; an invitation to anyone else stays pending until the owner removes it.
+
+Once accepted, the title, the text (with its attachments) and the color are shared and sync between both people. Folder, order, pin and protection are each person's own choice. The same button shows that the note is shared and with whom, adds more people, and stops sharing: the owner can remove anyone (pending or accepted), and an invited person can stop sharing, after which they no longer see it. The note always stays in the account of the person who created it; if the owner moves it to the trash, invited people stop seeing it, and they never get it in their own trash.
+
+Editing at the same time works like editing on two devices: changes arrive live while you are not typing, and if both people change the same note at once the other version is kept as a "(conflict)" copy.
+
+Known limits:
+- A pending invitee can already read the note before accepting (the owner chose to send it to them), and everyone in it can see the other people's emails and personal settings (folder ids, order, pin, lock).
+- The inviter's email shown in the invitation is written by the owner's app; the rules do not check it.
+- Attachments added by an invited person are stored in their own Storage. Removing them from the note, or deleting the note, does not delete those files; they stay in the uploader's account.
+- If you are removed from a note while you have unsent offline edits to it, the cloud rejects them; the text is kept on your device as with any rejected change.
+- Emails are compared exactly (lowercase); Google account emails are lowercase.
+
 ## Data model
 
 - `users/{uid}/folders/{id}` — `name`, `parentId`, `order`
 - `users/{uid}/notes/{id}` — `title`, `content` (TipTap JSON string), `preview`, `folderId`, `order`, `pinned`, `locked`, `color`, `trashed`, `trashedAt`, plus `rev`/`baseRev`/`device` stamped on each title/content save (a save based on an older `rev` than the one a device holds keeps that device's version as a "(conflict)" copy; notes from older app versions have none)
+- Shared notes add `ownerEmail`, `invited` and `members` (lists of emails) and `prefs.<email>` with each invited person's `folderId`, `order`, `pinned` and `locked`. Invited people find them with collection-group queries on `members` / `invited` (indexes in `firestore.indexes.json`)
 - Storage: `users/{uid}/notes/{noteId}/{timestamp}-{random}-{file}`
 
 `order` fields are fractional-index keys, so reordering only rewrites the moved item.

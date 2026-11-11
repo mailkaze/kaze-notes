@@ -6,7 +6,7 @@ import type { Backend, SnapshotMeta, WriteOp } from './types'
 /**
  * Backend local sin Firebase (modo `--mode memory`): datos en localStorage de este navegador.
  * Simula la latencia del servidor para que el indicador de sincronización sea observable en pruebas.
- * Para probar con varias cuentas, `?as=nombre` entra en esa pestaña como `nombre@local`; las pestañas del mismo
+ * Para probar con varias cuentas, `?as=nombre` entra en esa pestaña como `nombre@local.test`; las pestañas del mismo
  * navegador comparten los datos y se avisan de los cambios.
  */
 const STORAGE_KEY = 'kaze:memory-db'
@@ -14,7 +14,7 @@ const USER_KEY = 'kaze:memory-user'
 const AS_KEY = 'kaze:memory-as'
 const LATENCY_MS = 350
 const DEMO_UID = 'local'
-const DEMO_EMAIL = 'demo@local'
+const DEMO_EMAIL = 'demo@local.test'
 
 // Las notas y carpetas se guardan por su id; las que no son de la cuenta de demostración llevan su dueño.
 type StoredNote = Note & { owner?: string; prefs?: Record<string, SharePrefs> }
@@ -64,11 +64,11 @@ function tabUser(): AppUser {
   } catch {
     // Sin almacenamiento de sesión: cuenta de demostración.
   }
-  return name ? { uid: name, name, email: `${name}@local`, photoURL: null } : demoUser
+  return name ? { uid: name, name, email: `${name}@local.test`, photoURL: null } : demoUser
 }
 
 const ownerOf = (item: { owner?: string }) => item.owner ?? DEMO_UID
-const emailOf = (uid: string) => (uid === DEMO_UID ? DEMO_EMAIL : `${uid}@local`)
+const emailOf = (uid: string) => (uid === DEMO_UID ? DEMO_EMAIL : `${uid}@local.test`)
 
 /** La nota tal y como la ve su dueño (sin los datos internos del almacén). */
 function plainNote(stored: StoredNote): Note {

@@ -36,9 +36,11 @@ import {
 } from '../../state/store'
 import { confirmDialog } from '../ui/confirm'
 import { SidebarToggle } from '../ui/controls'
+import { InvitesBell } from '../ui/InvitesBell'
 import { Popover } from '../ui/Popover'
 import { SyncIndicator } from '../ui/SyncIndicator'
 import { pickerOptions, type PickerOption } from './folderPicker'
+import { ShareButton } from './ShareMenu'
 
 function ColorPicker({ value, onPick }: { value: NoteColorId | null; onPick: (color: NoteColorId | null) => void }) {
   const options: { id: NoteColorId | null; label: string }[] = [{ id: null, label: t('No color', 'Sin color') }, ...NOTE_COLORS]
@@ -254,6 +256,8 @@ export function NoteHeader({ note }: { note: Note }) {
     ? t('Exit full screen (Esc)', 'Salir de pantalla completa (Esc)')
     : t('Full screen', 'Pantalla completa')
   const trashLabel = t('Move to trash', 'Mover a la papelera')
+  // Una nota compartida conmigo no va a mi papelera: se deja de compartir desde su botón.
+  const canTrash = !note.ownerUid
   const colorLabel = t('Note color', 'Color de la nota')
   const pickColor = (color: NoteColorId | null) => {
     setColor(note.id, color)
@@ -267,7 +271,9 @@ export function NoteHeader({ note }: { note: Note }) {
         <ArrowLeft size={21} />
       </button>
       <FolderPicker note={note} />
+      <InvitesBell />
       <SyncIndicator />
+      <ShareButton note={note} />
       <button
         ref={setColorButton}
         type="button"
@@ -312,9 +318,11 @@ export function NoteHeader({ note }: { note: Note }) {
       >
         {fullscreen ? <Minimize2 size={21} /> : <Maximize2 size={21} />}
       </button>
-      <button type="button" className="icon-btn note-wide-only" aria-label={trashLabel} title={trashLabel} onClick={() => trashNote(note.id)}>
-        <Trash size={21} />
-      </button>
+      {canTrash && (
+        <button type="button" className="icon-btn note-wide-only" aria-label={trashLabel} title={trashLabel} onClick={() => trashNote(note.id)}>
+          <Trash size={21} />
+        </button>
+      )}
       <button
         ref={setMoreButton}
         type="button"
@@ -355,10 +363,12 @@ export function NoteHeader({ note }: { note: Note }) {
           <FingerprintPattern size={16} />
           {lockLabel}
         </button>
-        <button type="button" className="menu-item danger" onClick={() => trashNote(note.id)}>
-          <Trash size={16} />
-          {trashLabel}
-        </button>
+        {canTrash && (
+          <button type="button" className="menu-item danger" onClick={() => trashNote(note.id)}>
+            <Trash size={16} />
+            {trashLabel}
+          </button>
+        )}
       </Popover>
     </header>
   )

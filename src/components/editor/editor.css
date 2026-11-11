@@ -837,3 +837,103 @@
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* ---------- Compartir ---------- */
+.share-btn {
+  position: relative;
+}
+
+.share-count {
+  position: absolute;
+  right: 1px;
+  bottom: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.share-pop {
+  width: min(340px, calc(100vw - 16px));
+}
+
+.share-title {
+  margin: 4px 6px 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.share-people {
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.share-person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 0 0 6px;
+}
+
+.share-email {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-tag {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.share-remove {
+  width: 30px;
+  height: 30px;
+}
+
+.share-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px;
+}
+
+.share-input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+}
+
+.share-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.share-error {
+  flex: 1 1 100%;
+  margin: 2px 2px 0;
+  color: var(--danger);
+  font-size: 13px;
+}

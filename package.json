@@ -13,7 +13,7 @@
     "test:e2e": "playwright test",
     "test:e2e:offline": "playwright test -c playwright.offline.config.ts",
     "rules:build": "node scripts/build-rules.mjs",
-    "rules:deploy": "node scripts/build-rules.mjs && firebase deploy --only firestore:rules,storage"
+    "rules:deploy": "node scripts/build-rules.mjs && firebase deploy --only firestore:rules,firestore:indexes,storage"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.0",

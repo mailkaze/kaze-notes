@@ -9,6 +9,7 @@ import { activeNotes, childFolders, folderPath, folderPathLabel, notesInFolder }
 import type { Folder, LayoutMode, Note } from '../../lib/types'
 import { createNote, moveNote, openFolder, setLayout, setNoteOrder, setSearch, useApp } from '../../state/store'
 import { FOCUS_SEARCH_EVENT, SidebarToggle } from '../ui/controls'
+import { InvitesBell } from '../ui/InvitesBell'
 import { SyncIndicator } from '../ui/SyncIndicator'
 import { dragEnded, dragStarted, useDragSensors } from '../sidebar/dnd'
 import { useSidebarDrop } from '../sidebar/externalDrop'
@@ -367,6 +368,7 @@ export function NotesScreen({ folderId }: { folderId: string | null }) {
           >
             <SquarePen size={21} />
           </button>
+          <InvitesBell />
           <SyncIndicator compact={narrow} />
         </div>
       </header>
