@@ -172,6 +172,9 @@ export function flushAll() {
 
 // ---------- Escrituras ----------
 
+/** Identifica esta carga de la página en los guardados de texto: lo escrito aquí nunca se toma por un conflicto. */
+const deviceId = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('')
+
 function applyLocal(ops: WriteOp[]) {
   set((s) => {
     const notes = { ...s.notes }
@@ -219,8 +222,39 @@ function sameNote(a: Note, b: Note) {
     a.color === b.color &&
     a.trashed === b.trashed &&
     a.title === b.title &&
-    a.content === b.content
+    a.content === b.content &&
+    a.rev === b.rev
   )
+}
+
+/** Resumen corto (FNV-1a de 32 bits) para distinguir versiones en ids deterministas. */
+function shortHash(value: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+/**
+ * Otro dispositivo que editó partiendo de una revisión anterior (p. ej. sin conexión) ha sustituido la versión
+ * que había aquí: se guarda como copia de conflicto junto a la nota. El id sale de la versión sustituida, así
+ * que todos los dispositivos que la vieron escriben la misma copia.
+ */
+function keepOverwritten(prev: Record<string, Note>, list: Note[]) {
+  const { dirty } = get().sync
+  for (const note of list) {
+    const old = prev[note.id]
+    if (!old || !note.device || note.device === deviceId || note.baseRev === undefined) continue
+    // Misma marca que ya había: guardado de una versión antigua de la app o cambio solo de metadatos.
+    if (note.device === old.device && note.rev === old.rev) continue
+    if (note.baseRev >= (old.rev ?? 0)) continue
+    if (note.title === old.title && note.content === old.content) continue
+    // Con cambios sin guardar en el editor, su `flush` une las versiones y guarda la copia si hace falta.
+    if (dirty.includes(`note:${note.id}`)) continue
+    createConflictCopy(note.id, old, `${note.id}-conflict-${old.rev ?? 0}-${shortHash(`${old.title}\n${old.content}`)}`)
+  }
 }
 
 function sameFolder(a: Folder, b: Folder) {
@@ -317,7 +351,9 @@ export function initApp() {
         notes: (list, meta) => {
           notesMeta = meta
           received()
+          const prev = get().notes
           set((s) => ({ notes: mergeRecord(s.notes, list, sameNote) }))
+          keepOverwritten(prev, list)
           updateMeta()
         },
         folders: (list, meta) => {
@@ -482,25 +518,30 @@ function tooLargeToSave(content: string): boolean {
 
 /** Guarda cambios de una nota. Devuelve false si no se ha guardado (no existe o es demasiado grande). */
 export function updateNote(id: string, patch: Partial<Pick<Note, 'title' | 'content' | 'preview'>>): boolean {
-  if (!get().notes[id]) return false
+  const note = get().notes[id]
+  if (!note) return false
   if (patch.content !== undefined) {
     const tooLarge = tooLargeToSave(patch.content)
     const list = get().sync.tooLarge
     if (tooLarge !== list.includes(id)) setLasting({ tooLarge: tooLarge ? [...list, id] : list.filter((n) => n !== id) })
     if (tooLarge) return false
   }
-  commit([{ type: 'setNote', id, data: { ...patch, updatedAt: Date.now() } }])
+  // La revisión de la que parte permite a los demás dispositivos ver si este guardado pisa uno que no conocía.
+  const baseRev = note.rev ?? 0
+  commit([{ type: 'setNote', id, data: { ...patch, baseRev, rev: baseRev + 1, device: deviceId, updatedAt: Date.now() } }])
   return true
 }
 
 /**
  * Guarda como nota nueva otra versión de `id` (p. ej. la llegada de otro dispositivo mientras se editaba aquí),
  * justo después de la original en el orden global, sin abrirla ni fijarla. Devuelve su id.
+ * Con `copyId` no se reescribe una copia que ya existe (otro dispositivo la guardó y quizá ya se ha editado).
  */
-export function createConflictCopy(id: string, version: Pick<Note, 'title' | 'content'>): string {
+export function createConflictCopy(id: string, version: Pick<Note, 'title' | 'content'>, copyId?: string): string {
   const note = get().notes[id]
   if (!note || !backend) return ''
-  const copyId = backend.newId()
+  if (copyId && get().notes[copyId]) return copyId
+  copyId ??= backend.newId()
   const list = activeNotes(get().notes)
   const next = list[list.findIndex((n) => n.id === id) + 1]
   const base = version.title.trim()

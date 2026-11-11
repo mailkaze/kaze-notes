@@ -46,10 +46,13 @@ import {
   deleteNoteForever,
   emptyTrash,
   initApp,
+  markDirty,
   referencedPaths,
   registerFlush,
   renameFolder,
   selectSyncStatus,
+  setColor,
+  setNoteOrder,
   setPinned,
   signIn,
   updateNote,
@@ -92,6 +95,8 @@ function setNotes(...list: Note[]) {
 }
 
 const writtenOps = () => fake.backend.write.mock.calls.flatMap(([, ops]) => ops)
+const writtenData = () =>
+  writtenOps().map((op) => (op.type === 'setNote' ? (op.data as Partial<Note>) : {}))
 const lastHandlers = () => fake.state.handlers[fake.state.handlers.length - 1]
 
 beforeAll(() => initApp())
@@ -135,6 +140,120 @@ describe('data snapshots', () => {
     expect(after.b).toBe(before.b)
     lastHandlers().notes([{ ...b }], meta)
     expect(Object.keys(useApp.getState().notes)).toEqual(['b'])
+  })
+
+  it('takes a change of revision alone', () => {
+    const a = note('a', { rev: 1 })
+    lastHandlers().notes([a], meta)
+    lastHandlers().notes([{ ...a, rev: 2, baseRev: 1, device: 'other-device' }], meta)
+    expect(useApp.getState().notes.a.rev).toBe(2)
+  })
+})
+
+describe('edits overwritten by another device', () => {
+  const mine = doc(text('versión de aquí'))
+  const theirs = doc(text('versión del iPad'))
+  /** Escritura de otro dispositivo que partió de la revisión 4 (no vio la 5 que hay aquí). */
+  const fromOlderBase = (n: Note): Note => ({ ...n, content: theirs, rev: 5, baseRev: 4, device: 'other-device' })
+
+  it('stamps each title or text save with the next revision and this page, and leaves metadata changes unstamped', async () => {
+    setNotes(note('a', { rev: 3, order: 'a1' }), note('b'))
+    updateNote('a', { title: 'T' })
+    updateNote('a', { content: doc(text('hola')), preview: 'hola' })
+    updateNote('b', { title: 'B' })
+    setPinned('a', true)
+    setColor('a', 'mint')
+    setNoteOrder('a', 'a3')
+    await settle()
+    const [first, second, other, ...metadata] = writtenData()
+    expect(first).toMatchObject({ title: 'T', baseRev: 3, rev: 4, device: expect.any(String) })
+    expect(second).toMatchObject({ baseRev: 4, rev: 5, device: first.device })
+    expect(other).toMatchObject({ baseRev: 0, rev: 1, device: first.device })
+    expect(metadata).toHaveLength(3)
+    for (const data of metadata) {
+      for (const key of ['rev', 'baseRev', 'device']) expect(data).not.toHaveProperty(key)
+    }
+    expect(useApp.getState().notes.a).toMatchObject({ rev: 5, baseRev: 4, device: first.device })
+  })
+
+  it('keeps the version that a write based on an older revision replaced as a conflict copy next to the note', () => {
+    const a = note('a', { order: 'a1', title: 'Lista', content: mine, rev: 5, color: 'mint' })
+    const b = note('b', { order: 'a2' })
+    lastHandlers().notes([a, b], meta)
+    lastHandlers().notes([fromOlderBase(a), b], meta)
+    const { notes } = useApp.getState()
+    expect(notes.a.content).toBe(theirs)
+    const copies = Object.values(notes).filter((n) => n.id !== 'a' && n.id !== 'b')
+    expect(copies).toHaveLength(1)
+    expect(copies[0]).toMatchObject({ title: 'Lista (conflict)', content: mine, color: 'mint', pinned: false, trashed: false })
+    expect(copies[0].order > 'a1' && copies[0].order < 'a2').toBe(true)
+    expect(writtenOps()).toEqual([expect.objectContaining({ type: 'setNote', id: copies[0].id })])
+  })
+
+  it('names the copy after the replaced version, so seeing the same overwrite again writes the same copy', () => {
+    const a = note('a', { title: 'Lista', content: mine, rev: 5 })
+    setNotes(a)
+    lastHandlers().notes([fromOlderBase(a)], meta)
+    // Otro dispositivo que tenía la misma versión ve la misma sobrescritura.
+    setNotes(a)
+    lastHandlers().notes([fromOlderBase(a)], meta)
+    // Otra versión sustituida con la misma revisión no choca con la anterior.
+    const other = note('a', { title: 'Lista', content: doc(text('otra versión')), rev: 5 })
+    setNotes(other)
+    lastHandlers().notes([fromOlderBase(other)], meta)
+    const ids = writtenOps().map((op) => op.id)
+    expect(ids).toHaveLength(3)
+    expect(ids[1]).toBe(ids[0])
+    expect(ids[2]).not.toBe(ids[0])
+    expect(ids.every((id) => id !== 'a')).toBe(true)
+  })
+
+  it('does not write the copy again when it already exists (it may have been edited since)', () => {
+    const a = note('a', { title: 'Lista', content: mine, rev: 5 })
+    setNotes(a)
+    lastHandlers().notes([fromOlderBase(a)], meta)
+    const [copyId] = writtenOps().map((op) => op.id)
+    const edited = { ...useApp.getState().notes[copyId], content: doc(text('copia editada')) }
+    vi.clearAllMocks()
+    setNotes(a, edited)
+    lastHandlers().notes([fromOlderBase(a), edited], meta)
+    expect(fake.backend.write).not.toHaveBeenCalled()
+    expect(useApp.getState().notes[copyId].content).toBe(doc(text('copia editada')))
+  })
+
+  it('ignores a late echo of an earlier write from this same page', async () => {
+    setNotes(note('a', { title: 'Lista', content: mine }))
+    updateNote('a', { content: doc(text('v1')) })
+    updateNote('a', { content: doc(text('v2')) })
+    await settle()
+    const [firstWrite] = writtenData()
+    expect(firstWrite).toMatchObject({ rev: 1, baseRev: 0, device: expect.any(String) })
+    // Llega tarde el eco de la primera escritura, ya superada por la segunda.
+    lastHandlers().notes([{ ...useApp.getState().notes.a, ...firstWrite }], meta)
+    expect(writtenOps()).toHaveLength(2)
+  })
+
+  it('leaves it to the editor while the note has unsaved changes there', () => {
+    const a = note('a', { content: mine, rev: 5 })
+    lastHandlers().notes([a], meta)
+    markDirty('note:a')
+    lastHandlers().notes([fromOlderBase(a)], meta)
+    expect(fake.backend.write).not.toHaveBeenCalled()
+  })
+
+  it('makes no copy for a text change that carries no new revision (an older app version)', () => {
+    const a = note('a', { content: mine, rev: 5, baseRev: 4, device: 'other-device' })
+    lastHandlers().notes([a], meta)
+    lastHandlers().notes([{ ...a, content: theirs }], meta)
+    expect(fake.backend.write).not.toHaveBeenCalled()
+  })
+
+  it('makes no copy for a write based on the latest revision', () => {
+    const a = note('a', { content: mine, rev: 5 })
+    lastHandlers().notes([a], meta)
+    lastHandlers().notes([{ ...a, content: theirs, rev: 6, baseRev: 5, device: 'other-device' }], meta)
+    expect(fake.backend.write).not.toHaveBeenCalled()
+    expect(useApp.getState().notes.a.content).toBe(theirs)
   })
 })
 

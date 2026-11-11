@@ -21,7 +21,12 @@ async function newNote(page: Page, title: string, body = '') {
   }
 }
 
-type StoredNote = { id: string; title: string; content: string; trashed: boolean }
+async function backToNotes(page: Page) {
+  await page.getByRole('button', { name: 'Volver a las notas' }).click()
+  await expect(page.locator('.ProseMirror')).toHaveCount(0)
+}
+
+type StoredNote = { id: string; title: string; content: string; trashed: boolean; order: string; rev?: number }
 
 function storedNotes(page: Page): Promise<StoredNote[]> {
   return page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('kaze:memory-db') ?? '{"notes":{}}').notes))
@@ -49,6 +54,17 @@ async function remoteChange(page: Page, id: string, data: Record<string, unknown
     },
     { id, data },
   )
+}
+
+/** Edición de otro dispositivo (p. ej. hecha sin conexión) que partió de la revisión `baseRev` de la nota. */
+function otherDeviceEdit(page: Page, id: string, baseRev: number, text: string) {
+  return remoteChange(page, id, {
+    content: paragraph(text),
+    preview: text,
+    rev: baseRev + 1,
+    baseRev,
+    device: 'other-device',
+  })
 }
 
 /** Escribe con pausas para que el cambio remoto llegue mientras hay cambios locales sin guardar. */
@@ -123,6 +139,61 @@ test('a text changed here and a title changed on another device are both kept, w
   await expect(page.locator('.ProseMirror')).toHaveText('primera y segunda')
   expect((await noteById(page, id))?.title).toBe('Ideas buenas')
   expect((await storedNotes(page)).map((n) => n.title)).toEqual(['Ideas buenas'])
+})
+
+test('an edit from another device that started before the last save here keeps this version as a conflict copy next to the note', async ({
+  page,
+}) => {
+  await newNote(page, 'Plan', 'version de aqui')
+  await expect.poll(async () => (await storedNote(page, 'Plan'))?.content ?? '').toContain('version de aqui')
+  const id = (await storedNote(page, 'Plan'))!.id
+  await backToNotes(page)
+
+  // El iPad editó sin conexión la nota recién creada, sin la versión guardada aquí, y ahora se sincroniza.
+  await otherDeviceEdit(page, id, 0, 'version del ipad')
+
+  await expect(page.locator('.note-card-title')).toHaveText(['Plan', 'Plan (conflicto)'])
+  await expect(page.getByTestId('note-card').first()).toContainText('version del ipad')
+  await expect(page.getByTestId('note-card').last()).toContainText('version de aqui')
+  const original = (await noteById(page, id))!
+  const copy = (await storedNote(page, 'Plan (conflicto)'))!
+  expect(original.content).toContain('version del ipad')
+  expect(copy.content).toContain('version de aqui')
+  expect(copy).toMatchObject({ trashed: false })
+  expect(original.order < copy.order).toBe(true)
+})
+
+test('a note open here but idle, replaced by another device that started from an older version, shows the new version and keeps this one as a copy', async ({
+  page,
+}) => {
+  await newNote(page, 'Plan', 'version de aqui')
+  await expect.poll(async () => (await storedNote(page, 'Plan'))?.content ?? '').toContain('version de aqui')
+  const id = (await storedNote(page, 'Plan'))!.id
+
+  await otherDeviceEdit(page, id, 0, 'version del ipad')
+
+  await expect(page.locator('.ProseMirror')).toHaveText('version del ipad')
+  await expect(page.getByPlaceholder('Título')).toHaveValue('Plan')
+  await expect(page.getByTestId('tree-note').filter({ hasText: 'Plan (conflicto)' })).toBeVisible()
+  expect((await storedNote(page, 'Plan (conflicto)'))?.content).toContain('version de aqui')
+  expect((await noteById(page, id))?.content).toContain('version del ipad')
+  expect((await storedNotes(page)).map((n) => n.title).sort()).toEqual(['Plan', 'Plan (conflicto)'])
+})
+
+test('an edit from another device that started from the last version saved here just replaces it, with no conflict copy', async ({
+  page,
+}) => {
+  await newNote(page, 'Plan', 'version de aqui')
+  await expect.poll(async () => (await storedNote(page, 'Plan'))?.content ?? '').toContain('version de aqui')
+  const { id, rev } = (await storedNote(page, 'Plan'))!
+  expect(rev).toBeGreaterThan(0)
+  await backToNotes(page)
+
+  await otherDeviceEdit(page, id, rev!, 'version del ipad')
+
+  await expect(page.getByTestId('note-card')).toContainText('version del ipad')
+  await expect(page.locator('.note-card-title')).toHaveText(['Plan'])
+  expect((await storedNotes(page)).map((n) => n.title)).toEqual(['Plan'])
 })
 
 /** Sustituye la subida de ficheros por una que tarda `ms` milisegundos. */

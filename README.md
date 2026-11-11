@@ -62,7 +62,7 @@ This only locks the interface. The content is still stored unencrypted in Firest
 ## Data model
 
 - `users/{uid}/folders/{id}` — `name`, `parentId`, `order`
-- `users/{uid}/notes/{id}` — `title`, `content` (TipTap JSON string), `preview`, `folderId`, `order`, `pinned`, `locked`, `color`, `trashed`, `trashedAt`
+- `users/{uid}/notes/{id}` — `title`, `content` (TipTap JSON string), `preview`, `folderId`, `order`, `pinned`, `locked`, `color`, `trashed`, `trashedAt`, plus `rev`/`baseRev`/`device` stamped on each title/content save (a save based on an older `rev` than the one a device holds keeps that device's version as a "(conflict)" copy; notes from older app versions have none)
 - Storage: `users/{uid}/notes/{noteId}/{timestamp}-{random}-{file}`
 
 `order` fields are fractional-index keys, so reordering only rewrites the moved item.

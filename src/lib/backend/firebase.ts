@@ -42,7 +42,7 @@ export function readFirebaseConfig() {
 }
 
 function toNote(id: string, d: DocumentData): Note {
-  return {
+  const note: Note = {
     id,
     title: typeof d.title === 'string' ? d.title : '',
     content: typeof d.content === 'string' ? d.content : '',
@@ -57,6 +57,11 @@ function toNote(id: string, d: DocumentData): Note {
     createdAt: typeof d.createdAt === 'number' ? d.createdAt : 0,
     updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : 0,
   }
+  // Marca de revisión: solo con el tipo correcto (las notas antiguas no la tienen).
+  if (typeof d.rev === 'number') note.rev = d.rev
+  if (typeof d.baseRev === 'number') note.baseRev = d.baseRev
+  if (typeof d.device === 'string') note.device = d.device
+  return note
 }
 
 function toFolder(id: string, d: DocumentData): Folder {

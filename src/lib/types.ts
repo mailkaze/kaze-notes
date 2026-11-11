@@ -31,6 +31,12 @@ export interface Note {
   trashedAt: number | null
   createdAt: number
   updatedAt: number
+  /** Revisión del título y el contenido: sube en cada guardado de texto (sin ella en notas antiguas). */
+  rev?: number
+  /** Revisión de la que partió el último guardado de texto. */
+  baseRev?: number
+  /** Carga de la página (dispositivo) que hizo el último guardado de texto. */
+  device?: string
 }
 
 export interface Folder {
