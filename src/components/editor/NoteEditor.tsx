@@ -14,7 +14,7 @@ import {
   updateNote,
   useApp,
 } from '../../state/store'
-import { insertFiles, registerLiveEditor } from './attachment'
+import { canOpenUrl, insertFiles, registerLiveEditor } from './attachment'
 import { EmojiMenu, EmojiMenuController, emojiSuggestionKey } from './EmojiMenu'
 import { createExtensions } from './extensions'
 import { FormatToolbar } from './FormatToolbar'
@@ -69,7 +69,7 @@ function EditorScreen({ noteId }: { noteId: string }) {
   const saved = useRef({ title: initial.title, content: initial.content })
   const pending = useRef({ dirty: false, timer: 0, since: 0, title: initial.title })
   const latest = useRef<EditorState | null>(null)
-  // Fuerza a aplicar una versión remota que llegó mientras había cambios locales que al final no se guardaron.
+  // Fuerza a aplicar lo llegado de otro dispositivo que no chocó con los cambios locales sin guardar.
   const [resync, setResync] = useState(0)
 
   const flush = useCallback(() => {
@@ -82,23 +82,35 @@ function EditorScreen({ noteId }: { noteId: string }) {
     const state = latest.current
     if (state) {
       const json = state.doc.toJSON()
-      const content = JSON.stringify(json)
+      const local = { title: p.title, content: JSON.stringify(json) }
+      const base = saved.current
       // Versión de otro dispositivo que no se aplicó al editor porque había cambios sin guardar.
-      const stored = useApp.getState().notes[noteId]
-      const remote =
-        stored && (stored.content !== saved.current.content || stored.title !== saved.current.title) ? stored : null
-      if (content !== saved.current.content || p.title !== saved.current.title) {
-        if (remote) {
-          // No se sobrescribe: se guarda como nota aparte y después se escribe la versión local.
-          if (remote.content !== content || remote.title !== p.title) createConflictCopy(noteId, remote)
-          saved.current = { title: remote.title, content: remote.content }
-        }
-        if (updateNote(noteId, { title: p.title, content, preview: previewFromDoc(json) })) {
-          saved.current = { title: p.title, content }
-        }
-      } else if (remote) {
-        setResync((n) => n + 1)
+      const remote = useApp.getState().notes[noteId] ?? base
+      const here = { title: local.title !== base.title, content: local.content !== base.content }
+      const there = { title: remote.title !== base.title, content: remote.content !== base.content }
+      // Solo es conflicto un campo cambiado en los dos lados con valores distintos.
+      const conflict = (f: 'title' | 'content') => here[f] && there[f] && remote[f] !== local[f]
+      if (conflict('title') || conflict('content')) {
+        // No se sobrescribe: se guarda como nota aparte y después se escribe la versión local.
+        createConflictCopy(noteId, remote)
       }
+      // Lo cambiado en los dos lados ya está en la copia (o coincide): deja de contar como cambio remoto.
+      saved.current = {
+        title: here.title && there.title ? remote.title : base.title,
+        content: here.content && there.content ? remote.content : base.content,
+      }
+      // Solo se guarda lo cambiado aquí.
+      const patch: { title?: string; content?: string; preview?: string } = {}
+      if (here.title) patch.title = local.title
+      if (here.content) {
+        patch.content = local.content
+        patch.preview = previewFromDoc(json)
+      }
+      if ((here.title || here.content) && updateNote(noteId, patch)) {
+        saved.current = { title: patch.title ?? saved.current.title, content: patch.content ?? saved.current.content }
+      }
+      // Lo cambiado solo en el otro dispositivo pasa al editor con los efectos de más abajo.
+      if ((there.title && !here.title) || (there.content && !here.content)) setResync((n) => n + 1)
     }
     markClean(dirtyKey)
   }, [noteId, dirtyKey])
@@ -168,7 +180,7 @@ function EditorScreen({ noteId }: { noteId: string }) {
           const link = (event.target as Element | null)?.closest?.('a[href]')
           if (!(link instanceof HTMLAnchorElement)) return false
           event.preventDefault()
-          window.open(link.href, '_blank', 'noopener,noreferrer')
+          if (canOpenUrl(link.href)) window.open(link.href, '_blank', 'noopener,noreferrer')
           return true
         },
       },
@@ -188,7 +200,7 @@ function EditorScreen({ noteId }: { noteId: string }) {
   useEffect(() => registerLiveEditor(noteId, editor), [noteId, editor])
 
   // ---------- Cambios llegados de otro dispositivo ----------
-  // Con cambios locales sin guardar no se aplican: `flush` los conserva como nota aparte.
+  // Con cambios locales sin guardar no se aplican: `flush` une los campos y conserva como nota aparte lo que choca.
   const remoteContent = note?.content
   const remoteTitle = note?.title
   useEffect(() => {

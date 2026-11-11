@@ -4,13 +4,20 @@ import { NotesScreen } from './components/notes/NotesScreen'
 import { TrashScreen } from './components/notes/TrashScreen'
 import { Sidebar } from './components/sidebar/Sidebar'
 import { ConfirmHost, isConfirmOpen } from './components/ui/confirm'
+import { chunkLoaded, ErrorBoundary } from './components/ui/ErrorBoundary'
 import { FOCUS_SEARCH_EVENT } from './components/ui/controls'
 import { backendError } from './lib/backend'
+import { t } from './lib/i18n'
 import type { ThemePref } from './lib/types'
 import { closeNote, openFolder, setFullscreen, setSidebarOpen, useApp } from './state/store'
 
 // El editor (TipTap) va en un fichero aparte: la primera carga es más ligera.
-const NoteEditor = lazy(() => import('./components/editor/NoteEditor').then((m) => ({ default: m.NoteEditor })))
+const NoteEditor = lazy(() =>
+  import('./components/editor/NoteEditor').then((m) => {
+    chunkLoaded()
+    return { default: m.NoteEditor }
+  }),
+)
 
 function useTheme(theme: ThemePref) {
   useEffect(() => {
@@ -63,19 +70,26 @@ function useGlobalShortcuts() {
 function MainView() {
   const view = useApp((s) => s.view)
   const dataReady = useApp((s) => s.dataReady)
-  const noteExists = useApp((s) => (s.view.kind === 'note' ? Boolean(s.notes[s.view.noteId]) : true))
+  const noteOpen = useApp((s) => {
+    if (s.view.kind !== 'note') return true
+    const note = s.notes[s.view.noteId]
+    return Boolean(note && !note.trashed)
+  })
 
-  // Si la nota abierta desaparece (borrada en otro dispositivo), se vuelve a la lista.
+  // Si la nota abierta desaparece o va a la papelera en otro dispositivo, se vuelve a la lista
+  // (lo pendiente se guarda en ella y se puede recuperar desde la papelera).
   useEffect(() => {
-    if (dataReady && !noteExists) closeNote()
-  }, [dataReady, noteExists])
+    if (dataReady && !noteOpen) closeNote()
+  }, [dataReady, noteOpen])
 
   if (!dataReady) return <LoadingScreen />
-  if (view.kind === 'note' && noteExists) {
+  if (view.kind === 'note' && noteOpen) {
     return (
-      <Suspense fallback={<LoadingScreen />}>
-        <NoteEditor key={view.noteId} noteId={view.noteId} />
-      </Suspense>
+      <ErrorBoundary key={view.noteId} message={t("The note couldn't be opened.", 'No se ha podido abrir la nota.')}>
+        <Suspense fallback={<LoadingScreen />}>
+          <NoteEditor key={view.noteId} noteId={view.noteId} />
+        </Suspense>
+      </ErrorBoundary>
     )
   }
   if (view.kind === 'trash') return <TrashScreen />

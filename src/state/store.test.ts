@@ -40,12 +40,15 @@ vi.mock('../lib/backend', () => ({ backend: fake.backend, backendError: null }))
 import {
   closeNote,
   createConflictCopy,
+  createFolder,
+  createNote,
   deleteAttachmentFile,
   deleteNoteForever,
   emptyTrash,
   initApp,
   referencedPaths,
   registerFlush,
+  renameFolder,
   selectSyncStatus,
   setPinned,
   signIn,
@@ -280,6 +283,19 @@ describe('attachment files shared between notes', () => {
     expect(useApp.getState().view).toEqual({ kind: 'notes', folderId: null })
   })
 
+  it('closing a new untitled note whose save was refused as too large keeps it and its files', async () => {
+    setNotes(note('e', { title: '', content: '' }))
+    useApp.setState({ view: { kind: 'note', noteId: 'e' } })
+    expect(updateNote('e', { content: 'x'.repeat(950_000) })).toBe(false)
+    closeNote()
+    await settle()
+    expect(fake.backend.write).not.toHaveBeenCalled()
+    expect(fake.backend.deleteNoteFiles).not.toHaveBeenCalled()
+    expect(useApp.getState().notes.e).toBeDefined()
+    expect(useApp.getState().sync.tooLarge).toEqual(['e'])
+    expect(useApp.getState().view).toEqual({ kind: 'notes', folderId: null })
+  })
+
   it('closing a note with content keeps it and its files', async () => {
     setNotes(note('a'))
     useApp.setState({ view: { kind: 'note', noteId: 'a' } })
@@ -288,6 +304,31 @@ describe('attachment files shared between notes', () => {
     expect(fake.backend.write).not.toHaveBeenCalled()
     expect(fake.backend.deleteNoteFiles).not.toHaveBeenCalled()
     expect(useApp.getState().notes.a).toBeDefined()
+  })
+})
+
+describe('records deleted on another device', () => {
+  it('drops changes to a note or folder that no longer exists, while new ones are still created', async () => {
+    setNotes(note('a', { order: 'a1' }))
+    setPinned('gone', true)
+    renameFolder('gone-folder', 'Nueva')
+    await settle()
+    expect(fake.backend.write).not.toHaveBeenCalled()
+    expect(useApp.getState().notes.gone).toBeUndefined()
+    expect(useApp.getState().folders['gone-folder']).toBeUndefined()
+
+    const noteId = createNote(null, false)
+    const folderId = createFolder(null, 'Carpeta')
+    const copyId = createConflictCopy('a', { title: 'a', content: doc(text('otra versión')) })
+    await settle()
+    expect(writtenOps().map((op) => [op.type, op.id])).toEqual([
+      ['setNote', noteId],
+      ['setFolder', folderId],
+      ['setNote', copyId],
+    ])
+    expect(useApp.getState().notes[noteId]).toMatchObject({ title: '', content: '', trashed: false })
+    expect(useApp.getState().folders[folderId]).toMatchObject({ name: 'Carpeta', parentId: null })
+    expect(useApp.getState().notes[copyId]).toMatchObject({ title: 'a (conflict)', content: doc(text('otra versión')) })
   })
 })
 

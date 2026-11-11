@@ -62,6 +62,25 @@ function storedLocked(page: Page, title: string): Promise<boolean | undefined> {
 
 const card = (page: Page, title: string) => page.getByTestId('note-card').filter({ hasText: title })
 
+/** Simula que la app pasa `ms` milisegundos oculta (otra app, la pantalla bloqueada…) y vuelve. */
+async function hideApp(page: Page, ms: number) {
+  await page.evaluate((ms) => {
+    const w = window as unknown as { __realNow?: () => number; __offset: number }
+    if (!w.__realNow) {
+      const realNow = Date.now.bind(Date)
+      w.__realNow = realNow
+      w.__offset = 0
+      Date.now = () => realNow() + w.__offset
+    }
+    let state: DocumentVisibilityState = 'hidden'
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+    document.dispatchEvent(new Event('visibilitychange'))
+    w.__offset += ms
+    state = 'visible'
+    document.dispatchEvent(new Event('visibilitychange'))
+  }, ms)
+}
+
 test('a protected note hides its content until the device verifies the user, and locks again on leaving', async ({ page }) => {
   const auth = await addDeviceAuthenticator(page)
   await signIn(page)
@@ -108,6 +127,31 @@ test('a protected note hides its content until the device verifies the user, and
   await card(page, 'Banco').getByRole('button').first().click()
   await expect(page.getByText('Esta nota está protegida.')).toBeVisible()
   await expect(page.locator('.ProseMirror')).toHaveCount(0)
+})
+
+test('an unlocked protected note locks again when the app comes back after a minute hidden, not after a short while', async ({
+  page,
+}) => {
+  const auth = await addDeviceAuthenticator(page)
+  await signIn(page)
+  await newNote(page, 'Claves', 'wifi 1234')
+  await page.getByRole('button', { name: 'Proteger nota' }).click()
+  await expect.poll(() => storedLocked(page, 'Claves')).toBe(true)
+  await setVerified(auth, false)
+
+  // Un momento fuera (p. ej. el selector de ficheros o la cámara al adjuntar): sigue abierta.
+  await hideApp(page, 50_000)
+  await expect(page.locator('.ProseMirror')).toContainText('wifi 1234')
+
+  // Un minuto fuera (otra app, la pantalla bloqueada): hay que verificarse otra vez.
+  await hideApp(page, 60_000)
+  await expect(page.getByText('Esta nota está protegida.')).toBeVisible()
+  await expect(page.locator('.ProseMirror')).toHaveCount(0)
+  await expect(page.locator('.note-editor')).not.toContainText('wifi')
+
+  await setVerified(auth, true)
+  await page.getByRole('button', { name: 'Desbloquear' }).click()
+  await expect(page.locator('.ProseMirror')).toContainText('wifi 1234')
 })
 
 test('removing the protection shows the note again without verification', async ({ page }) => {

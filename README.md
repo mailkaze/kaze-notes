@@ -55,7 +55,7 @@ Copying from a note puts WhatsApp syntax on the clipboard: `*bold*`, `_italic_`,
 
 ## Protected notes
 
-The fingerprint button in a note's header protects it. A protected note shows only its title in lists, the sidebar and the trash. Search matches only its title. Opening it asks the device to verify you (fingerprint, Face ID, pattern or PIN) through WebAuthn with the device's own authenticator. Each device is registered the first time it verifies you. The note locks again when you leave it.
+The fingerprint button in a note's header protects it. A protected note shows only its title in lists, the sidebar and the trash. Search matches only its title. Opening it asks the device to verify you (fingerprint, Face ID, pattern or PIN) through WebAuthn with the device's own authenticator. Each device is registered the first time it verifies you. The note locks again when you leave it, and when you come back to the app after it has been hidden for a minute or more (another app, a locked screen); a shorter absence, like picking a file or taking a photo to attach, keeps it open.
 
 This only locks the interface. The content is still stored unencrypted in Firestore and in the browser's offline cache, so it does not protect against someone who has access to your account or to the device's browser data.
 

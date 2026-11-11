@@ -186,9 +186,19 @@ function applyLocal(ops: WriteOp[]) {
   })
 }
 
+/** Un cambio parcial de algo que ya no existe (borrado en otro dispositivo) crearía un registro incompleto. */
+function isStale(op: WriteOp): boolean {
+  if (op.type !== 'setNote' && op.type !== 'setFolder') return false
+  // Las creaciones llevan el registro completo.
+  if ('createdAt' in op.data) return false
+  const { notes, folders } = get()
+  return op.type === 'setNote' ? !notes[op.id] : !folders[op.id]
+}
+
 /** Aplica los cambios en local al instante (optimista) y los envía a la nube. */
-function commit(ops: WriteOp[]) {
+function commit(allOps: WriteOp[]) {
   const user = get().user
+  const ops = allOps.filter((op) => !isStale(op))
   if (!user || !backend || ops.length === 0) return
   applyLocal(ops)
   backend.write(user.uid, ops).then(
@@ -233,6 +243,9 @@ function mergeRecord<T extends { id: string }>(prev: Record<string, T>, list: T[
 // Tras un error de la escucha de datos se vuelve a escuchar pasado este tiempo.
 const RESUBSCRIBE_MS = 10_000
 
+// Tiempo oculta tras el que una nota protegida desbloqueada se vuelve a bloquear.
+const RELOCK_AFTER_HIDDEN_MS = 60_000
+
 let unsubscribeData: (() => void) | null = null
 let resubscribeTimer: ReturnType<typeof setTimeout> | undefined
 let initialized = false
@@ -244,8 +257,25 @@ export function initApp() {
   window.addEventListener('online', () => setSync({ online: true }))
   window.addEventListener('offline', () => setSync({ online: false }))
   window.addEventListener('pagehide', flushAll)
+  // Al cerrar la pestaña solo se pregunta si hay una subida en curso: el texto pendiente se guarda ya.
+  window.addEventListener('beforeunload', (event) => {
+    flushAll()
+    if (!get().sync.dirty.some((key) => key.startsWith(UPLOAD_KEY))) return
+    event.preventDefault()
+    // Para navegadores que aún no atienden a preventDefault aquí.
+    event.returnValue = true
+  })
+  let hiddenAt = 0
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flushAll()
+    if (document.visibilityState === 'hidden') {
+      hiddenAt = Date.now()
+      flushAll()
+      return
+    }
+    // Tras un rato fuera (otra app, la pantalla bloqueada) la nota protegida se vuelve a bloquear;
+    // no tras una ausencia corta, como el selector de ficheros o la cámara al adjuntar.
+    if (hiddenAt && Date.now() - hiddenAt >= RELOCK_AFTER_HIDDEN_MS) set({ unlockedNoteId: null })
+    hiddenAt = 0
   })
 
   if (!backend) {
@@ -336,8 +366,11 @@ function leaveCurrentNote() {
   if (view.kind !== 'note') return
   flushAll()
   set({ unlockedNoteId: null })
-  const note = get().notes[view.noteId]
-  if (note && !note.trashed && !note.title.trim() && !hasContent(parseContent(note.content))) {
+  const { notes, sync } = get()
+  const note = notes[view.noteId]
+  // Una nota cuyo guardado se rechazó por grande no está vacía aunque lo parezca aquí.
+  const refused = sync.tooLarge.includes(view.noteId)
+  if (note && !note.trashed && !refused && !note.title.trim() && !hasContent(parseContent(note.content))) {
     // También se borran los ficheros que subió y ya no usa (p. ej. un adjunto quitado con retroceso).
     deleteNoteForever(note.id)
   }
@@ -609,6 +642,9 @@ export function emptyTrash() {
 
 export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
+// Prefijo de las claves de `sync.dirty` de las subidas en curso.
+const UPLOAD_KEY = 'upload:'
+
 /** Sube un adjunto y marca la sincronización como pendiente mientras dura la subida. */
 export async function uploadAttachment(
   noteId: string,
@@ -621,7 +657,7 @@ export async function uploadAttachment(
   if (file.size >= MAX_UPLOAD_BYTES) {
     throw new Error(t(`"${file.name}" is larger than 100 MB`, `"${file.name}" pesa más de 100 MB`))
   }
-  const key = `upload:${backend.newId()}`
+  const key = `${UPLOAD_KEY}${backend.newId()}`
   markDirty(key)
   try {
     return await backend.uploadFile(user.uid, noteId, file, onProgress)
