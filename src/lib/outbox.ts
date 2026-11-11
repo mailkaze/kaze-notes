@@ -99,9 +99,23 @@ export async function listUploads(uid: string): Promise<OutboxEntry[]> {
   return (await allEntries()).filter((entry) => entry.uid === uid).sort((a, b) => a.createdAt - b.createdAt)
 }
 
+// Avisa a las demás pestañas de que un fichero ha salido de la cola (subido o descartado).
+const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('kaze-outbox')
+
 export async function deleteUpload(id: string): Promise<void> {
   memory.delete(id)
   await run('readwrite', (store) => store.delete(id)).catch(() => undefined)
+  channel?.postMessage({ removed: id })
+}
+
+/** Llama a `listener` cuando otra pestaña saca un fichero de la cola. Devuelve cómo dejar de escuchar. */
+export function onUploadRemoved(listener: (id: string) => void): () => void {
+  const handle = (event: MessageEvent) => {
+    const id = (event.data as { removed?: unknown } | null)?.removed
+    if (typeof id === 'string') listener(id)
+  }
+  channel?.addEventListener('message', handle)
+  return () => channel?.removeEventListener('message', handle)
 }
 
 /** Ficheros sin subir de un usuario (o de todos). */

@@ -20,7 +20,7 @@ import {
 import { useState, useSyncExternalStore, type MouseEvent } from 'react'
 import { parseContent } from '../../lib/docText'
 import { t } from '../../lib/i18n'
-import { deleteUpload, getUpload, listUploads, saveUpload, type OutboxEntry } from '../../lib/outbox'
+import { deleteUpload, getUpload, listUploads, onUploadRemoved, saveUpload, type OutboxEntry } from '../../lib/outbox'
 import {
   deleteAttachmentFile,
   isPermanentUploadError,
@@ -82,10 +82,26 @@ const liveEditors = new Map<string, Editor>()
 /** Registra el editor abierto de una nota. Devuelve la función que lo da de baja. */
 export function registerLiveEditor(noteId: string, editor: Editor): () => void {
   liveEditors.set(noteId, editor)
+  // Mientras la nota está abierta aquí, las demás pestañas dejan que esta suba sus ficheros: el resultado entra en
+  // este editor y no choca con lo que se está escribiendo.
+  let release = () => {}
+  const locks = webLocks()
+  if (locks) {
+    const open = new Promise<void>((resolve) => (release = resolve))
+    void locks.request(editorLock(noteId), { mode: 'shared' }, () => open).catch(() => undefined)
+  }
   return () => {
     if (liveEditors.get(noteId) === editor) liveEditors.delete(noteId)
+    release()
   }
 }
+
+function webLocks(): LockManager | undefined {
+  return typeof navigator === 'undefined' ? undefined : navigator.locks
+}
+
+const editorLock = (noteId: string) => `kaze-editor:${noteId}`
+const uploadLock = (id: string) => `kaze-upload:${id}`
 
 /** Solo se abren enlaces web o ficheros locales de esta pestaña. */
 export function canOpenUrl(url: string): boolean {
@@ -417,11 +433,47 @@ async function upload(noteId: string, id: string, file: File, stored: Promise<un
   forget(id)
 }
 
-/** Ejecuta `fn` salvo que otra pestaña ya esté subiendo ese fichero. */
+// Un fichero que otra pestaña ya ha subido (o descartado) deja de contar aquí como pendiente.
+onUploadRemoved((id) => {
+  if (!uploading.has(id)) forget(id)
+})
+
+/** Ejecuta `fn` salvo que otra pestaña ya esté subiendo ese fichero: entonces lo revisa cuando acabe. */
 function exclusive(id: string, fn: () => Promise<void>): Promise<void> {
-  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks
+  const locks = webLocks()
   if (!locks) return fn()
-  return locks.request(`kaze-upload:${id}`, { ifAvailable: true }, (lock) => (lock ? fn() : undefined))
+  return locks.request(uploadLock(id), { ifAvailable: true }, (lock) => {
+    if (lock) return fn()
+    afterOtherTab(uploadLock(id), id)
+    return undefined
+  })
+}
+
+/**
+ * Cuando otra pestaña suelta `lockName` (acabó de subir el fichero o cerró la nota), se revisa la cola: si el
+ * fichero ya no está, deja de contar aquí como pendiente; si sigue, se intenta subir desde esta.
+ */
+function afterOtherTab(lockName: string, id: string) {
+  void webLocks()
+    ?.request(lockName, async () => {
+      if (await getUpload(id)) resumeUploads()
+      else forget(id)
+    })
+    .catch(() => undefined)
+}
+
+/**
+ * Si la nota está abierta en el editor de otra pestaña (y no en esta), le deja el fichero a esa pestaña y lo revisa
+ * cuando termine de subirlo o, si no lo está subiendo, cuando cierre la nota. true si se lo ha dejado.
+ */
+async function handOver(entry: OutboxEntry): Promise<boolean> {
+  const locks = webLocks()
+  if (!locks || liveEditors.has(entry.noteId)) return false
+  const { held = [] } = await locks.query()
+  const names = new Set(held.map((lock) => lock.name))
+  if (!names.has(editorLock(entry.noteId))) return false
+  afterOtherTab(names.has(uploadLock(entry.id)) ? uploadLock(entry.id) : editorLock(entry.noteId), entry.id)
+  return true
 }
 
 /** Guarda el fichero en la cola del dispositivo y lo sube si hay conexión. */
@@ -467,7 +519,7 @@ function retryLater() {
   failuresInARow += 1
   retryTimer = setTimeout(() => {
     retryTimer = undefined
-    resumeUploads()
+    runPass()
   }, nextRetryDelay(failuresInARow))
 }
 
@@ -527,15 +579,27 @@ async function runQueue() {
   turn.forEach((entry) => setUploading(entry.id, true))
   for (const entry of turn) {
     try {
-      if (canUpload()) await exclusive(entry.id, () => sendQueued(entry))
+      if (!canUpload()) continue
+      // Lo sube la pestaña que tiene la nota abierta.
+      if (!(await handOver(entry))) await exclusive(entry.id, () => sendQueued(entry))
     } finally {
       setUploading(entry.id, false)
     }
   }
+  // Una pasada sin fallos de red vuelve a la espera corta para el siguiente fallo.
+  if (!retryTimer) failuresInARow = 0
 }
 
-/** Sube los ficheros en cola de este dispositivo para el usuario actual. Nunca hay dos pasadas a la vez. */
+/**
+ * Sube los ficheros en cola de este dispositivo para el usuario actual (al abrir la app, al volver la conexión…).
+ * Nunca hay dos pasadas a la vez.
+ */
 export function resumeUploads() {
+  failuresInARow = 0
+  runPass()
+}
+
+function runPass() {
   if (running) {
     runAgain = true
     return
@@ -546,7 +610,7 @@ export function resumeUploads() {
       running = null
       if (runAgain) {
         runAgain = false
-        resumeUploads()
+        runPass()
       }
     })
 }
