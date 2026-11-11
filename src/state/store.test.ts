@@ -233,12 +233,14 @@ describe('edits overwritten by another device', () => {
     expect(writtenOps()).toHaveLength(2)
   })
 
-  it('leaves it to the editor while the note has unsaved changes there', () => {
+  it('keeps the replaced version as a copy even while the note has unsaved changes in the editor', () => {
     const a = note('a', { content: mine, rev: 5 })
     lastHandlers().notes([a], meta)
     markDirty('note:a')
     lastHandlers().notes([fromOlderBase(a)], meta)
-    expect(fake.backend.write).not.toHaveBeenCalled()
+    // El editor solo conserva los campos que se están editando aquí: el resto de esta versión iría a parar a ninguna parte.
+    const copies = Object.values(useApp.getState().notes).filter((n) => n.id !== 'a')
+    expect(copies.map((n) => n.content)).toEqual([mine])
   })
 
   it('makes no copy for a text change that carries no new revision (an older app version)', () => {

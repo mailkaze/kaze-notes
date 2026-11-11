@@ -180,6 +180,24 @@ test('a note open here but idle, replaced by another device that started from an
   expect((await storedNotes(page)).map((n) => n.title).sort()).toEqual(['Plan', 'Plan (conflicto)'])
 })
 
+test('while the title is being typed here, another device replacing the text from an older version keeps the text saved here as a copy', async ({
+  page,
+}) => {
+  await newNote(page, 'Plan', 'version de aqui')
+  await expect.poll(async () => (await storedNote(page, 'Plan'))?.content ?? '').toContain('version de aqui')
+  const id = (await storedNote(page, 'Plan'))!.id
+
+  await page.getByPlaceholder('Título').click()
+  await page.keyboard.press('End')
+  await typeWhileRemoteArrives(page, ' nuevo', () => otherDeviceEdit(page, id, 0, 'version del ipad'))
+
+  await expect.poll(async () => (await noteById(page, id))?.title).toBe('Plan nuevo')
+  expect((await noteById(page, id))?.content).toContain('version del ipad')
+  await expect
+    .poll(async () => (await storedNotes(page)).filter((n) => n.id !== id && n.content.includes('version de aqui')).length)
+    .toBe(1)
+})
+
 test('an edit from another device that started from the last version saved here just replaces it, with no conflict copy', async ({
   page,
 }) => {

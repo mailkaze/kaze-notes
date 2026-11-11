@@ -243,7 +243,6 @@ function shortHash(value: string): string {
  * que todos los dispositivos que la vieron escriben la misma copia.
  */
 function keepOverwritten(prev: Record<string, Note>, list: Note[]) {
-  const { dirty } = get().sync
   for (const note of list) {
     const old = prev[note.id]
     if (!old || !note.device || note.device === deviceId || note.baseRev === undefined) continue
@@ -251,8 +250,7 @@ function keepOverwritten(prev: Record<string, Note>, list: Note[]) {
     if (note.device === old.device && note.rev === old.rev) continue
     if (note.baseRev >= (old.rev ?? 0)) continue
     if (note.title === old.title && note.content === old.content) continue
-    // Con cambios sin guardar en el editor, su `flush` une las versiones y guarda la copia si hace falta.
-    if (dirty.includes(`note:${note.id}`)) continue
+    // También con cambios sin guardar en el editor: su `flush` solo conserva los campos editados aquí.
     createConflictCopy(note.id, old, `${note.id}-conflict-${old.rev ?? 0}-${shortHash(`${old.title}\n${old.content}`)}`)
   }
 }
