@@ -38,4 +38,15 @@ describe('upload outbox', () => {
     expect(await pendingUploadCount()).toBe(0)
     expect(await listUploads('u2')).toEqual([])
   })
+
+  it('tells other tabs a file left the queue only when it really left the shared queue', async () => {
+    const heard: unknown[] = []
+    const other = new BroadcastChannel('kaze-outbox')
+    other.onmessage = (event) => heard.push(event.data)
+    // Sin IndexedDB el fichero solo estaba en esta pestaña: las demás no tienen nada que olvidar.
+    await deleteUpload('solo-aqui')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    other.close()
+    expect(heard).toEqual([])
+  })
 })

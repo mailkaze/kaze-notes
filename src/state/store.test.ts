@@ -62,6 +62,7 @@ import {
   setNoteOrder,
   setPinned,
   signIn,
+  signOut,
   updateNote,
   UPLOAD_KEY,
   uploadAttachment,
@@ -685,5 +686,23 @@ describe('signing out with changes kept only in this tab', () => {
     expect(await hasUnsyncedChanges()).toBe(true)
     useApp.setState((s) => ({ sync: { ...s.sync, rejected: {}, tooLarge: ['n2'] } }))
     expect(await hasUnsyncedChanges()).toBe(true)
+  })
+})
+
+describe('a rejection that arrives while signing out', () => {
+  it('does not keep the text on the device again', async () => {
+    setNotes(note('n1'))
+    let reject!: (error: Error) => void
+    fake.backend.write.mockImplementationOnce(() => new Promise((_, r) => (reject = r)))
+    updateNote('n1', { content: doc(text('b')) })
+    let finish!: () => void
+    fake.backend.signOut.mockImplementationOnce(() => new Promise<undefined>((r) => (finish = () => r(undefined))))
+    const leaving = signOut()
+    await settle()
+    reject(new Error('Missing or insufficient permissions.'))
+    await settle()
+    expect(Object.keys(localStorage).filter((key) => key.startsWith('kaze:rejected:'))).toEqual([])
+    finish()
+    await leaving
   })
 })

@@ -243,13 +243,18 @@ describe('service worker', () => {
     expect(world.cached('kaze-files')).toEqual(files.slice(2))
   })
 
-  it('stops keeping downloaded files when the app already uses half of its storage quota', async () => {
+  it('when the app already uses half of its storage quota, frees the oldest half of the files instead of adding more', async () => {
     const world = createWorld()
     const worker = await installed(world, 'v1', ['/index.html'])
+    const files = Array.from({ length: 5 }, (_, i) => FILE.replace('a.png', `${i}.png`))
+    for (const file of files.slice(0, 4)) {
+      world.serveOpaque(file)
+      await worker.request(file)
+    }
     Object.assign(worker.self, { navigator: { storage: { estimate: async () => ({ usage: 60, quota: 100 }) } } })
-    world.serveOpaque(FILE)
-    expect((await worker.request(FILE))?.type).toBe('opaque')
-    expect(world.cached('kaze-files')).toEqual([])
+    world.serveOpaque(files[4])
+    expect((await worker.request(files[4]))?.type).toBe('opaque')
+    expect(world.cached('kaze-files')).toEqual(files.slice(2, 4))
   })
 
   it('clears the downloaded files alone, or every app cache', async () => {

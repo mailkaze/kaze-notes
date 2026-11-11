@@ -64,8 +64,7 @@ test('a tab that saw a file another tab was uploading does not stay syncing afte
   await expect.poll(() => outboxSize(page)).toBe(0)
 
   // B must not keep a pending mark for a file that is no longer queued anywhere.
-  await other.waitForTimeout(2000)
-  expect(await dirtyKeys(other)).toEqual([])
+  await expect.poll(() => dirtyKeys(other)).toEqual([])
 })
 
 test('a file waiting in the queue is uploaded by the tab that has its note open, not by another tab', async ({ page, context }) => {
@@ -100,19 +99,17 @@ test('a file waiting in the queue is uploaded by the tab that has its note open,
 
   // Pestaña B: al abrir encuentra el fichero en la cola, pero la nota está abierta en A.
   const other = await context.newPage()
-  await other.addInitScript(() => {
-    ;(window as unknown as { uploadsHere: number }).uploadsHere = 0
+  // Se cuentan las subidas de B desde que carga: la pasada al abrir puede empezar antes que cualquier evaluate.
+  await other.route('**/src/lib/backend/memory.ts*', async (route) => {
+    const response = await route.fetch()
+    const body = (await response.text()).replace(
+      'uploadFile(uid, noteId, file, onProgress) {',
+      'uploadFile(uid, noteId, file, onProgress) { window.uploadsHere = (window.uploadsHere ?? 0) + 1;',
+    )
+    if (!body.includes('window.uploadsHere')) throw new Error('memory backend uploadFile not found')
+    await route.fulfill({ response, body })
   })
   await other.goto('/')
-  await other.evaluate(async () => {
-    const url = '/src/lib/backend/index.ts'
-    const { backend } = await import(/* @vite-ignore */ url)
-    const original = backend.uploadFile
-    backend.uploadFile = (...args: unknown[]) => {
-      ;(window as unknown as { uploadsHere: number }).uploadsHere += 1
-      return original(...args)
-    }
-  })
   await expect(other.locator('.sidebar')).toBeVisible()
   await expect.poll(async () => (await dirtyKeys(other)).some((k) => k.startsWith('queued:'))).toBe(true)
 
@@ -121,5 +118,5 @@ test('a file waiting in the queue is uploaded by the tab that has its note open,
   await expect(chip).toHaveAttribute('data-state', 'done')
   await expect.poll(() => outboxSize(page)).toBe(0)
   await expect.poll(() => dirtyKeys(other)).toEqual([])
-  expect(await other.evaluate(() => (window as unknown as { uploadsHere: number }).uploadsHere)).toBe(0)
+  expect(await other.evaluate(() => (window as unknown as { uploadsHere?: number }).uploadsHere ?? 0)).toBe(0)
 })

@@ -85,20 +85,21 @@ const CLEAR_RETRY_MS = 500
 // Marca de una caché local que no se pudo borrar al cerrar sesión: se borra al abrir la app la próxima vez.
 const CLEAR_PENDING_KEY = 'kaze:clear-local-cache'
 
-function setClearPending(pending: boolean) {
+/** Guarda (o quita, con null) la cuenta cuya caché local quedó sin borrar. */
+function setClearPending(uid: string | null) {
   try {
-    if (pending) localStorage.setItem(CLEAR_PENDING_KEY, '1')
+    if (uid) localStorage.setItem(CLEAR_PENDING_KEY, uid)
     else localStorage.removeItem(CLEAR_PENDING_KEY)
   } catch {
     // Sin almacenamiento local.
   }
 }
 
-function isClearPending(): boolean {
+function clearPendingFor(): string | null {
   try {
-    return localStorage.getItem(CLEAR_PENDING_KEY) !== null
+    return localStorage.getItem(CLEAR_PENDING_KEY)
   } catch {
-    return false
+    return null
   }
 }
 
@@ -130,9 +131,11 @@ export function createFirebaseBackend(): Backend {
         }
         // Caché que no se pudo borrar al cerrar sesión: se borra solo sin sesión (aún sin usar Firestore). Con
         // sesión ya es la de esa cuenta y puede tener cambios sin enviar: nunca se borra.
-        if (isClearPending()) {
-          if (u) setClearPending(false)
-          else clearIndexedDbPersistence(db).then(() => setClearPending(false), () => undefined)
+        // Si entra otra cuenta, la marca se queda: la caché de la anterior se borra al abrir la app sin sesión.
+        const pendingUid = clearPendingFor()
+        if (pendingUid) {
+          if (u?.uid === pendingUid) setClearPending(null)
+          else if (!u) clearIndexedDbPersistence(db).then(() => setClearPending(null), () => undefined)
         }
         signedIn = Boolean(u)
         cb(u ? { uid: u.uid, name: u.displayName, email: u.email, photoURL: u.photoURL } : null)
@@ -159,6 +162,7 @@ export function createFirebaseBackend(): Backend {
     async signOut() {
       // Lo que quede sin enviar ya lo ha aceptado perder quien cierra la sesión (la app pregunta antes).
       signingOut = true
+      const uid = auth.currentUser?.uid ?? null
       await signOut(auth)
       // Que no queden notas en este dispositivo. Las demás pestañas se recargan al ver la sesión cerrada
       // y dejan libre la caché: se reintenta mientras tanto.
@@ -172,7 +176,7 @@ export function createFirebaseBackend(): Backend {
           await new Promise((resolve) => setTimeout(resolve, CLEAR_RETRY_MS))
         }
       }
-      setClearPending(!cleared)
+      setClearPending(cleared ? null : uid)
       window.location.reload()
     },
 

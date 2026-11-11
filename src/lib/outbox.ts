@@ -104,8 +104,12 @@ const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastCh
 
 export async function deleteUpload(id: string): Promise<void> {
   memory.delete(id)
-  await run('readwrite', (store) => store.delete(id)).catch(() => undefined)
-  channel?.postMessage({ removed: id })
+  const removed = await run('readwrite', (store) => store.delete(id)).then(
+    () => true,
+    () => false,
+  )
+  // Solo si de verdad ha salido de la cola compartida.
+  if (removed) channel?.postMessage({ removed: id })
 }
 
 /** Llama a `listener` cuando otra pestaña saca un fichero de la cola. Devuelve cómo dejar de escuchar. */

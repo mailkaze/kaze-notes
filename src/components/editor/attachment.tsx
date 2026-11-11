@@ -454,13 +454,22 @@ function exclusive(id: string, fn: () => Promise<void>): Promise<void> {
  * fichero ya no está, deja de contar aquí como pendiente; si sigue, se intenta subir desde esta.
  */
 function afterOtherTab(lockName: string, id: string) {
-  void webLocks()
-    ?.request(lockName, async () => {
-      if (await getUpload(id)) resumeUploads()
+  // Una sola espera por fichero y candado, aunque haya varias pasadas mientras tanto.
+  const key = `${lockName}|${id}`
+  const locks = webLocks()
+  if (!locks || waiting.has(key)) return
+  waiting.add(key)
+  void locks
+    .request(lockName, async () => {
+      // Sin volver a la espera corta: si la otra pestaña falló por la red, los reintentos siguen espaciándose.
+      if (await getUpload(id)) runPass()
       else forget(id)
     })
     .catch(() => undefined)
+    .finally(() => waiting.delete(key))
 }
+
+const waiting = new Set<string>()
 
 /**
  * Si la nota está abierta en el editor de otra pestaña (y no en esta), le deja el fichero a esa pestaña y lo revisa

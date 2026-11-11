@@ -84,11 +84,15 @@ async function hasRoom() {
 }
 
 async function keepFile(cache, request, response) {
-  if (!(await hasRoom())) return
-  await cache.put(request, response)
   // Las claves salen en orden de inserción: se borran las más antiguas.
   const keys = await cache.keys()
-  await Promise.all(keys.slice(0, Math.max(0, keys.length - MAX_FILES)).map((key) => cache.delete(key)))
+  if (!(await hasRoom())) {
+    // Sin sitio: se libera la mitad más antigua y este fichero no se guarda.
+    await Promise.all(keys.slice(0, Math.ceil(keys.length / 2)).map((key) => cache.delete(key)))
+    return
+  }
+  await cache.put(request, response)
+  await Promise.all(keys.slice(0, Math.max(0, keys.length + 1 - MAX_FILES)).map((key) => cache.delete(key)))
 }
 
 self.addEventListener('fetch', (event) => {

@@ -307,6 +307,8 @@ function textOf(op: WriteOp): Pick<RejectedVersion, 'title' | 'content'> | null 
 
 /** Tras una escritura: conserva el texto rechazado o, si salió bien, olvida lo rechazado antes. */
 function settleRejected(uid: string, ops: WriteOp[], seq: number, reason: string | null) {
+  // Un rechazo que llega mientras se cierra la sesión no vuelve a dejar en el dispositivo lo que se está borrando.
+  if (signingOut || get().user?.uid !== uid) return
   for (const op of ops) {
     const text = textOf(op)
     if (!text) continue
@@ -541,9 +543,13 @@ export async function hasUnsyncedChanges(): Promise<boolean> {
   return !synced || queued > 0 || rejected > 0 || notSaved > 0
 }
 
+// Cerrando la sesión: lo que llegue de escrituras anteriores ya no se guarda en el dispositivo.
+let signingOut = false
+
 /** Cierra la sesión y borra de este dispositivo los datos de la cuenta; las preferencias de la interfaz se quedan. */
 export async function signOut() {
   flushAll()
+  signingOut = true
   const { user } = get()
   if (user) {
     const uploads = await listUploads(user.uid).catch(() => [])
@@ -556,7 +562,12 @@ export async function signOut() {
       // Sin almacenamiento local.
     }
   }
-  await backend?.signOut()
+  try {
+    await backend?.signOut()
+  } finally {
+    // Sin sesión, lo que llegue después ya se descarta por no ser del usuario actual.
+    signingOut = false
+  }
 }
 
 // ---------- Navegación ----------
