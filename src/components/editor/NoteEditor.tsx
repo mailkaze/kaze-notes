@@ -16,7 +16,7 @@ import {
   updateNote,
   useApp,
 } from '../../state/store'
-import { canOpenLink, insertFiles, registerLiveEditor } from './attachment'
+import { insertFiles, linkTarget, registerLiveEditor } from './attachment'
 import { EmojiMenu, EmojiMenuController, emojiSuggestionKey } from './EmojiMenu'
 import { createExtensions } from './extensions'
 import { FormatToolbar } from './FormatToolbar'
@@ -193,7 +193,9 @@ function EditorScreen({ noteId }: { noteId: string }) {
           const link = (event.target as Element | null)?.closest?.('a[href]')
           if (!(link instanceof HTMLAnchorElement)) return false
           event.preventDefault()
-          if (canOpenLink(link.href)) window.open(link.href, '_blank', 'noopener,noreferrer')
+          // El atributo tal cual: `link.href` resolvería "example.com" como una ruta de esta app.
+          const target = linkTarget(link.getAttribute('href') ?? '')
+          if (target) window.open(target, '_blank', 'noopener,noreferrer')
           return true
         },
       },

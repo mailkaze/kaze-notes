@@ -6,6 +6,7 @@ import type { UploadResult } from '../../lib/backend'
 import {
   canOpenUrl,
   deleteAttachment,
+  linkTarget,
   fileIcon,
   formatSize,
   insertFiles,
@@ -237,6 +238,18 @@ describe('attachment chip helpers', () => {
     expect(canOpenUrl('javascript:alert(1)')).toBe(false)
     expect(canOpenUrl('data:text/html,<script>alert(1)</script>')).toBe(false)
     expect(canOpenUrl('')).toBe(false)
+  })
+
+  it('opens text links: web, mail, phone… and web addresses typed without https, never javascript: or data:', () => {
+    expect(linkTarget('https://example.com/a')).toBe('https://example.com/a')
+    expect(linkTarget('mailto:ana@example.com')).toBe('mailto:ana@example.com')
+    expect(linkTarget('tel:+34600000000')).toBe('tel:+34600000000')
+    expect(linkTarget('example.com')).toBe('https://example.com')
+    expect(linkTarget('www.example.es/ruta?q=1')).toBe('https://www.example.es/ruta?q=1')
+    expect(linkTarget('example.com:8080/x')).toBe('https://example.com:8080/x')
+    for (const unsafe of ['javascript:alert(1)', 'data:text/html,x', 'notas', '/ruta/relativa', '']) {
+      expect(linkTarget(unsafe)).toBeNull()
+    }
   })
 
   it('maps file types to icons and formats sizes', () => {

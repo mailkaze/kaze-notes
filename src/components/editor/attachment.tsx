@@ -99,13 +99,18 @@ export function canOpenUrl(url: string): boolean {
 // Los mismos protocolos que el enlace de TipTap admite por defecto: nunca "javascript:" ni "data:".
 const LINK_PROTOCOLS = ['https:', 'http:', 'ftp:', 'ftps:', 'mailto:', 'tel:', 'callto:', 'sms:', 'cid:', 'xmpp:']
 
-/** Enlaces del texto que se pueden abrir: web, correo, teléfono… */
-export function canOpenLink(url: string): boolean {
+// Dirección web escrita sin esquema (p. ej. "example.com/ruta"): se abre con https.
+const BARE_HOST = /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?([/?#]|$)/i
+
+/** Dirección que abre un enlace del texto (web, correo, teléfono…), o null si no se puede abrir. */
+export function linkTarget(href: string): string | null {
   try {
-    return LINK_PROTOCOLS.includes(new URL(url).protocol)
+    if (LINK_PROTOCOLS.includes(new URL(href).protocol)) return href
   } catch {
-    return false
+    // Sin esquema: puede ser una dirección web escrita a mano.
   }
+  const bare = href.trim()
+  return BARE_HOST.test(bare) ? `https://${bare}` : null
 }
 
 function dataAttr(name: string, parse: (value: string | null) => unknown = (v) => v ?? '') {
