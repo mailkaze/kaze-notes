@@ -9,6 +9,7 @@ import { FOCUS_SEARCH_EVENT } from './components/ui/controls'
 import { backendError } from './lib/backend'
 import { t } from './lib/i18n'
 import type { ThemePref } from './lib/types'
+import { UpdateBanner } from './pwa/UpdateBanner'
 import { closeNote, openFolder, setFullscreen, setSidebarOpen, useApp } from './state/store'
 
 // El editor (TipTap) va en un fichero aparte: la primera carga es más ligera.
@@ -97,6 +98,15 @@ function MainView() {
 }
 
 export function App() {
+  return (
+    <>
+      <Screens />
+      <UpdateBanner />
+    </>
+  )
+}
+
+function Screens() {
   const authReady = useApp((s) => s.authReady)
   const user = useApp((s) => s.user)
   const theme = useApp((s) => s.theme)

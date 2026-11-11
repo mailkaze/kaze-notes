@@ -1,9 +1,12 @@
 node_modules
 dist
+# Build de pruebas sin conexión (backend en memoria): nunca se despliega
+dist-e2e
 .env.local
 .env.*.local
 .firebase
 test-results
+test-results-offline
 playwright-report
 .DS_Store
 .atl

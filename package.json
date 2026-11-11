@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:offline": "playwright test -c playwright.offline.config.ts",
     "rules:build": "node scripts/build-rules.mjs",
     "rules:deploy": "node scripts/build-rules.mjs && firebase deploy --only firestore:rules,storage"
   },
