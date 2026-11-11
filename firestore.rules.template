@@ -2,17 +2,86 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Solo entran las cuentas permitidas, y cada una únicamente a sus datos.
-    function isOwner(uid) {
+    // Cuenta permitida con el correo verificado.
+    function isAllowed() {
       return request.auth != null
-        && request.auth.uid == uid
         && request.auth.token.email in [__OWNER_EMAILS__]
         && request.auth.token.email_verified == true;
+    }
+
+    // Solo entran las cuentas permitidas, y cada una únicamente a sus datos.
+    function isOwner(uid) {
+      return isAllowed() && request.auth.uid == uid;
     }
 
     // Todo lo demás queda denegado por defecto.
     match /users/{uid}/{document=**} {
       allow read, write: if isOwner(uid);
+    }
+
+    // ---------- Notas compartidas ----------
+    // La nota sigue en la cuenta de su dueño: `invited` y `members` son correos, y `prefs.<correo>` guarda la
+    // carpeta, el orden, el fijado y la protección que decide cada invitado.
+
+    function me() {
+      return request.auth.token.email;
+    }
+
+    function listOf(data, field) {
+      return data.get(field, []);
+    }
+
+    // Solo cambian los campos indicados.
+    function onlyChanges(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    // De las preferencias solo cambian las mías, y solo con sus campos.
+    function onlyMyPrefs() {
+      let after = request.resource.data.get('prefs', {});
+      return after.diff(resource.data.get('prefs', {})).affectedKeys().hasOnly([me()])
+        && (!(me() in after) || after[me()].keys().hasOnly(['folderId', 'order', 'pinned', 'locked']));
+    }
+
+    // La lista queda como antes más (o menos) mi correo, sin tocar a nadie más.
+    function addsMe(field) {
+      return listOf(request.resource.data, field).toSet() == listOf(resource.data, field).toSet().union([me()].toSet());
+    }
+
+    function removesMe(field) {
+      return listOf(request.resource.data, field).toSet() == listOf(resource.data, field).toSet().difference([me()].toSet());
+    }
+
+    // Miembro: edita lo común (título, contenido, color y marcas de revisión) y sus preferencias.
+    function editsShared() {
+      return me() in listOf(resource.data, 'members')
+        && onlyChanges(['title', 'content', 'preview', 'color', 'rev', 'baseRev', 'device', 'updatedAt', 'prefs'])
+        && onlyMyPrefs();
+    }
+
+    // Invitado: acepta (pasa de invitado a miembro).
+    function accepts() {
+      return me() in listOf(resource.data, 'invited')
+        && onlyChanges(['invited', 'members', 'prefs'])
+        && removesMe('invited') && addsMe('members') && onlyMyPrefs();
+    }
+
+    // Invitado o miembro: rechaza o deja de compartir (sale de las dos listas).
+    function leaves() {
+      return (me() in listOf(resource.data, 'invited') || me() in listOf(resource.data, 'members'))
+        && onlyChanges(['invited', 'members', 'prefs'])
+        && removesMe('invited') && removesMe('members') && onlyMyPrefs();
+    }
+
+    // Las notas compartidas conmigo, también las pendientes de aceptar (consultas de grupo incluidas). Acceso directo
+    // a los campos para que Firestore pueda comprobar las consultas `array-contains`; si falta uno, vale el otro.
+    match /{path=**}/notes/{noteId} {
+      allow read: if isAllowed() && (me() in resource.data.members || me() in resource.data.invited);
+    }
+
+    // Nadie más que el dueño crea o borra la nota.
+    match /users/{uid}/notes/{noteId} {
+      allow update: if isAllowed() && request.auth.uid != uid && (editsShared() || accepts() || leaves());
     }
   }
 }
