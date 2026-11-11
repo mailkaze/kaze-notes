@@ -27,8 +27,10 @@ npm run dev:memory
 npm install -g firebase-tools   # once
 firebase login
 OWNER_EMAIL=you@gmail.com npm run rules:deploy    # rules
-npm run build && firebase deploy --only hosting   # app → https://<project-id>.web.app
+firebase deploy --only hosting                    # app → https://<project-id>.web.app (builds it first)
 ```
+
+Deploys are guarded by `predeploy` hooks in `firebase.json`: a hosting deploy always runs `npm run build` first (so a test build never ships), and any deploy that includes the rules regenerates them from `OWNER_EMAIL`, so a plain `firebase deploy` without it stops instead of uploading stale local rules.
 
 The rules are generated from `firestore.rules.template` and `storage.rules.template` with `OWNER_EMAIL` (the generated `firestore.rules` / `storage.rules` are git-ignored). To let more people use the app, list every account comma-separated, e.g. `OWNER_EMAIL=you@gmail.com,friend@gmail.com`; each deploy replaces the previous list, so always pass all of them. Only those Google accounts, with a verified email, can read and write their own data under `users/{uid}` (nobody sees anyone else's notes), with a 100 MB limit per attachment. Any other account can sign in but gets permission errors. Attachments are displayed through Firebase download URLs, which carry an unguessable token: anyone who gets one of those URLs can open that file.
 
@@ -43,7 +45,31 @@ Recommended: in Google Cloud Console → *APIs & Services → Credentials*, rest
 | `npm run build` | Type-check and production build into `dist/` |
 | `npm test` | Unit tests (Vitest) |
 | `npm run test:e2e` | End-to-end tests (Playwright, in-browser backend) |
+| `npm run test:e2e:offline` | Offline tests on a production-style build with the in-browser backend, served with the production CSP (built into `dist-e2e`, never `dist`) |
 | `OWNER_EMAIL=… npm run rules:deploy` | Generate the security rules for the allowed account(s) and deploy them |
+
+## Offline
+
+After the first visit the app works with no connection, and syncs by itself when the connection comes back:
+
+- **The app itself**: the production build writes `dist/sw.js`, a service worker that saves every file of that build (HTML, code, styles, icons). The app always opens from that copy, with or without network. The previous version stays saved too, so a page still running it keeps working.
+- **Notes and folders**: Firestore keeps them in the browser and queues the changes made offline; they are sent when the connection returns.
+- **Attachments**: a file added offline (or whose upload fails because of the network) is saved on the device first. Its chip shows "Esperando conexión" with a local preview, and it uploads automatically when the connection returns or the app opens again, even after a reload. "Pendiente de subir" means another device still has to upload it. Files the cloud refuses (100 MB or more, permissions, quota) show "Error al subir" and are not retried. Images already viewed stay available offline (the latest 100); other file types open in a new tab and need the network.
+- **Updates**: the app looks for a new version on each load, when the connection comes back and when you return to it (at most once a minute). When one is installed it shows "Hay una versión nueva · Recargar"; reloading saves pending edits first.
+- The app asks the browser for persistent storage, so local data that is not synced yet is not evicted when the device runs low on space. On iPhone and iPad, Safari deletes a website's data after about 7 days without visiting it unless the app is added to the home screen: add it there if you edit offline.
+- If the cloud rejects a change (for example after losing permission), the text is not lost: it stays on the device, the note explains it, and it is sent again with the next edit (or can be discarded).
+
+Nothing from Firestore, Auth or Firebase's reserved `/__/` pages goes through the service worker, and it never runs in `npm run dev`.
+
+Emergency switch, if a broken version ever gets stuck on devices: deploy a build whose `sw.js` is replaced by a worker that, on `install`, calls `self.skipWaiting()` and, on `activate`, deletes every cache whose name starts with `kaze-`, calls `self.registration.unregister()` and reloads each window client (`client.navigate(client.url)`), and remove the `registerServiceWorker()` call from `src/main.tsx` in that same build (otherwise each reload registers it again). Clients pick it up on their next load, because `sw.js` is served with `Cache-Control: no-cache`.
+
+## Signing out
+
+Signing out first sends what is pending and waits a few seconds for the cloud. If something is still not synced (offline edits, files waiting to upload, rejected text), the app asks before deleting it. Signing out removes this account's data from the device: the notes cache, queued files, cached attachments and rejected text. Interface preferences (theme, layout, sidebar) stay. Other open tabs of the app reload when the session ends.
+
+## Security headers
+
+`firebase.json` sends a Content-Security-Policy and other security headers with the app page (`/` and `/index.html`) only, so Firebase's own sign-in pages under `/__/` keep theirs. The inline theme script in `index.html` is allowed by its hash: if you change it, update the hash (`src/hosting.test.ts` fails until you do). Try header changes on a preview channel before going live: `firebase hosting:channel:deploy preview` (then sign in and open notes and attachments on each device you use).
 
 ## Handwriting
 
