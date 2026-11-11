@@ -1,5 +1,5 @@
-import { keyBetween } from '../../lib/order'
-import { activeNotes, childFolders, isInsideFolder, notesInFolder } from '../../lib/tree'
+import { keyBetween, keyForIndex } from '../../lib/order'
+import { activeNotes, childFolders, isInsideFolder, notesInFolder, parentFolderId } from '../../lib/tree'
 import type { Folder, Note } from '../../lib/types'
 
 type Notes = Record<string, Note>
@@ -47,7 +47,7 @@ export function dropZone(dragKind: DragKind, target: DropTarget, ratio: number):
 function keyNextTo<T extends { id: string; order: string }>(list: T[], targetId: string, zone: DropZone): string | null {
   const i = list.findIndex((item) => item.id === targetId)
   if (i < 0 || zone === 'into') return null
-  return zone === 'before' ? keyBetween(list[i - 1]?.order, list[i].order) : keyBetween(list[i].order, list[i + 1]?.order)
+  return keyForIndex(list, zone === 'before' ? i : i + 1)
 }
 
 function resolveNote(note: Note, target: DropTarget, zone: DropZone, notes: Notes, folders: Folders): DropResult {
@@ -91,7 +91,8 @@ function resolveFolder(folder: Folder, target: DropTarget, zone: DropZone, notes
   const targetFolder = folders[target.id]
   if (!targetFolder || target.id === folder.id) return null
   if (zone === 'into') return atEndOf(target.id)
-  const parentId = targetFolder.parentId
+  // Padre efectivo: una carpeta en un ciclo de padres se muestra (y se ordena) en la raíz.
+  const parentId = parentFolderId(folders, targetFolder.id)
   if (parentId && isInsideFolder(folders, parentId, folder.id)) return null
   const siblings = childFolders(folders, parentId).filter((f) => f.id !== folder.id)
   const order = keyNextTo(siblings, target.id, zone)

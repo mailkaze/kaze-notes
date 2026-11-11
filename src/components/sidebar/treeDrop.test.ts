@@ -187,3 +187,19 @@ describe('resolveTreeDrop: folders', () => {
     expect(folderSequence(result, null)).toEqual(['A', 'B', 'A1a'])
   })
 })
+
+describe('resolveTreeDrop with data from two devices', () => {
+  it('places a folder dropped next to one on a parent cycle at the top level, where that folder is shown', () => {
+    const cyclic = byId(folder('X', 'a0', 'Y'), folder('Y', 'a1', 'X'), folder('M', 'a2', null))
+    const result = resolveTreeDrop({ kind: 'folder', id: 'M' }, { kind: 'folder', id: 'X' }, 'before', {}, cyclic)
+    expect(result).toMatchObject({ kind: 'folder', id: 'M', parentId: null })
+    expect((result as { order: string }).order < 'a0').toBe(true)
+  })
+
+  it('a note dropped after one of two notes sharing an order key goes before the next note, not tied with it', () => {
+    const dup = byId(note('n1', 'a0', null), note('n2', 'a1', null), note('n3', 'a1', null), note('n4', 'a2', null), note('m', 'a5', null))
+    const result = resolveTreeDrop({ kind: 'note', id: 'm' }, { kind: 'note', id: 'n2', section: 'tree' }, 'after', dup, {})
+    const order = (result as { order: string }).order
+    expect(order > 'a1' && order < 'a2').toBe(true)
+  })
+})
