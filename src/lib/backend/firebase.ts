@@ -8,19 +8,29 @@ import {
   signOut,
 } from 'firebase/auth'
 import {
+  arrayRemove,
+  arrayUnion,
   clearIndexedDbPersistence,
   collection,
+  collectionGroup,
+  deleteField,
   doc,
+  FieldPath,
   initializeFirestore,
   onSnapshot,
   persistentLocalCache,
   persistentMultipleTabManager,
+  query,
   terminate,
+  updateDoc,
   waitForPendingWrites,
+  where,
   writeBatch,
   type DocumentData,
+  type QueryDocumentSnapshot,
 } from 'firebase/firestore'
 import { deleteObject, getDownloadURL, getStorage, listAll, ref, uploadBytesResumable } from 'firebase/storage'
+import { sharedView, type Invite } from '../sharing'
 import type { Folder, Note, NoteColorId } from '../types'
 import { uploadPath } from './paths'
 import type { Backend, WriteOp } from './types'
@@ -62,8 +72,14 @@ function toNote(id: string, d: DocumentData): Note {
   if (typeof d.rev === 'number') note.rev = d.rev
   if (typeof d.baseRev === 'number') note.baseRev = d.baseRev
   if (typeof d.device === 'string') note.device = d.device
+  if (typeof d.ownerEmail === 'string') note.ownerEmail = d.ownerEmail
+  if (Array.isArray(d.invited)) note.invited = d.invited.filter((e): e is string => typeof e === 'string')
+  if (Array.isArray(d.members)) note.members = d.members.filter((e): e is string => typeof e === 'string')
   return note
 }
+
+/** Cuenta dueña de una nota sacada de una consulta de grupo (`users/{uid}/notes/{id}`). */
+const ownerOf = (d: QueryDocumentSnapshot) => d.ref.parent.parent?.id ?? ''
 
 function toFolder(id: string, d: DocumentData): Folder {
   return {
@@ -117,6 +133,7 @@ export function createFirebaseBackend(): Backend {
   let signingOut = false
 
   const userCol = (uid: string, name: 'notes' | 'folders') => collection(db, 'users', uid, name)
+  const noteDoc = (uid: string, noteId: string) => doc(db, 'users', uid, 'notes', noteId)
 
   return {
     kind: 'firebase',
@@ -218,6 +235,69 @@ export function createFirebaseBackend(): Backend {
       }
     },
 
+    subscribeShared(uid, email, handlers) {
+      const onError = (error: Error) => handlers.error(error)
+      const shared = (field: 'members' | 'invited') => query(collectionGroup(db, 'notes'), where(field, 'array-contains', email))
+      const unsubNotes = onSnapshot(
+        shared('members'),
+        { includeMetadataChanges: true },
+        (snap) =>
+          handlers.notes(
+            snap.docs
+              .filter((d) => ownerOf(d) !== uid)
+              .map((d) => sharedView(toNote(d.id, d.data()), ownerOf(d), d.data().prefs?.[email])),
+            { pendingWrites: snap.metadata.hasPendingWrites, fromCache: snap.metadata.fromCache },
+          ),
+        onError,
+      )
+      const unsubInvites = onSnapshot(
+        shared('invited'),
+        (snap) =>
+          handlers.invites(
+            snap.docs
+              .filter((d) => ownerOf(d) !== uid && d.data().trashed !== true)
+              .map((d): Invite => {
+                const ownerEmail = d.data().ownerEmail
+                return { noteId: d.id, ownerUid: ownerOf(d), ownerEmail: typeof ownerEmail === 'string' ? ownerEmail : '' }
+              }),
+          ),
+        onError,
+      )
+      return () => {
+        unsubNotes()
+        unsubInvites()
+      }
+    },
+
+    async share(uid, noteId, ownerEmail, email) {
+      await updateDoc(noteDoc(uid, noteId), { ownerEmail, invited: arrayUnion(email) })
+    },
+
+    async acceptShare(ownerUid, noteId, email, prefs) {
+      // Las claves de `prefs` son correos (llevan puntos): van como ruta de campo, no como texto con puntos.
+      await updateDoc(
+        noteDoc(ownerUid, noteId),
+        new FieldPath('prefs', email),
+        prefs,
+        'invited',
+        arrayRemove(email),
+        'members',
+        arrayUnion(email),
+      )
+    },
+
+    async removeShare(ownerUid, noteId, email) {
+      await updateDoc(
+        noteDoc(ownerUid, noteId),
+        new FieldPath('prefs', email),
+        deleteField(),
+        'invited',
+        arrayRemove(email),
+        'members',
+        arrayRemove(email),
+      )
+    },
+
     newId() {
       return doc(collection(db, '_ids')).id
     },
@@ -228,6 +308,11 @@ export function createFirebaseBackend(): Backend {
       for (let i = 0; i < ops.length; i += BATCH_LIMIT) {
         const batch = writeBatch(db)
         for (const op of ops.slice(i, i + BATCH_LIMIT)) {
+          // Los cambios en una nota compartida conmigo van a la nota de su dueño; `prefs` se fusiona por correo.
+          if (op.type === 'setSharedNote') {
+            batch.set(noteDoc(op.owner, op.id), op.data, { merge: true })
+            continue
+          }
           const col = op.type === 'setNote' || op.type === 'deleteNote' ? 'notes' : 'folders'
           const target = doc(userCol(uid, col), op.id)
           if (op.type === 'setNote' || op.type === 'setFolder') batch.set(target, op.data, { merge: true })

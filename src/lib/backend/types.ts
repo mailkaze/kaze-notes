@@ -1,3 +1,4 @@
+import type { Invite, SharedNoteData, SharePrefs } from '../sharing'
 import type { AppUser, Folder, Note } from '../types'
 
 export interface SnapshotMeta {
@@ -10,6 +11,8 @@ export interface SnapshotMeta {
 export type WriteOp =
   | { type: 'setNote'; id: string; data: Partial<Omit<Note, 'id'>> }
   | { type: 'deleteNote'; id: string }
+  /** Cambio de un invitado en la nota de `owner` (fusiona también `prefs`). */
+  | { type: 'setSharedNote'; owner: string; id: string; data: SharedNoteData }
   | { type: 'setFolder'; id: string; data: Partial<Omit<Folder, 'id'>> }
   | { type: 'deleteFolder'; id: string }
 
@@ -34,6 +37,22 @@ export interface Backend {
       error: (error: Error) => void
     },
   ): () => void
+  /** Escucha las notas de otros usuarios compartidas con `email` y las invitaciones pendientes a su nombre. */
+  subscribeShared(
+    uid: string,
+    email: string,
+    handlers: {
+      notes: (notes: Note[], meta: SnapshotMeta) => void
+      invites: (invites: Invite[]) => void
+      error: (error: Error) => void
+    },
+  ): () => void
+  /** El dueño `uid` invita a `email` a su nota. */
+  share(uid: string, noteId: string, ownerEmail: string, email: string): Promise<void>
+  /** `email` acepta la invitación: pasa a miembro y guarda sus preferencias de la nota. */
+  acceptShare(ownerUid: string, noteId: string, email: string, prefs: SharePrefs): Promise<void>
+  /** Quita a `email` de la nota (rechaza, la deja o el dueño deja de compartirla) y borra sus preferencias. */
+  removeShare(ownerUid: string, noteId: string, email: string): Promise<void>
   newId(): string
   /** Aplica las operaciones de forma atómica (los `set*` fusionan campos). */
   write(uid: string, ops: WriteOp[]): Promise<void>

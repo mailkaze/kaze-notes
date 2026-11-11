@@ -37,6 +37,14 @@ export interface Note {
   baseRev?: number
   /** Carga de la página (dispositivo) que hizo el último guardado de texto. */
   device?: string
+  /** Solo en las notas de otro usuario compartidas conmigo: la cuenta de su dueño. */
+  ownerUid?: string
+  /** Correo del dueño (se guarda al compartirla). */
+  ownerEmail?: string
+  /** Correos invitados que aún no han aceptado. */
+  invited?: string[]
+  /** Correos con los que está compartida. */
+  members?: string[]
 }
 
 export interface Folder {
