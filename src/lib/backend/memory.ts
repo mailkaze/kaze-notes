@@ -1,5 +1,5 @@
 import type { AppUser, Folder, Note } from '../types'
-import { uploadPath } from './firebase'
+import { uploadPath } from './paths'
 import type { Backend, SnapshotMeta, WriteOp } from './types'
 
 /**

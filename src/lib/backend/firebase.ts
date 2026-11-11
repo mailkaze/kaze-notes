@@ -22,6 +22,7 @@ import {
 } from 'firebase/firestore'
 import { deleteObject, getDownloadURL, getStorage, listAll, ref, uploadBytesResumable } from 'firebase/storage'
 import type { Folder, Note, NoteColorId } from '../types'
+import { uploadPath } from './paths'
 import type { Backend, WriteOp } from './types'
 
 const env = import.meta.env
@@ -75,18 +76,6 @@ function toFolder(id: string, d: DocumentData): Folder {
   }
 }
 
-/** Nombre de fichero seguro para la ruta de Storage. */
-function safeName(name: string): string {
-  return name.replace(/[\\/#?[\]*]+/g, '_').slice(-120) || 'file'
-}
-
-/**
- * Ruta de un adjunto nuevo en Storage. Lleva un trozo aleatorio para que dos ficheros con el mismo nombre
- * subidos a la vez (p. ej. varias "image.png" pegadas en iOS) no se pisen.
- */
-export function uploadPath(uid: string, noteId: string, fileName: string): string {
-  return `users/${uid}/notes/${noteId}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${safeName(fileName)}`
-}
 
 // Firestore admite como máximo 500 operaciones por lote.
 const BATCH_LIMIT = 450
