@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SnapshotMeta, WriteOp } from '../lib/backend'
+import type { Invite } from '../lib/sharing'
 import type { AppUser, Folder, Note } from '../lib/types'
 
 // Backend falso: registra escrituras, suscripciones y borrados de ficheros.
@@ -9,10 +10,16 @@ const fake = vi.hoisted(() => {
     folders: (folders: Folder[], meta: SnapshotMeta) => void
     error: (error: Error) => void
   }
+  type SharedHandlers = {
+    notes: (notes: Note[], meta: SnapshotMeta) => void
+    invites: (invites: Invite[]) => void
+    error: (error: Error) => void
+  }
   let seq = 0
   const state = {
     auth: null as ((user: AppUser | null) => void) | null,
     handlers: [] as Handlers[],
+    shared: [] as SharedHandlers[],
   }
   const backend = {
     kind: 'memory' as const,
@@ -27,6 +34,13 @@ const fake = vi.hoisted(() => {
       state.handlers.push(handlers)
       return () => undefined
     }),
+    subscribeShared: vi.fn((_uid: string, _email: string, handlers: SharedHandlers) => {
+      state.shared.push(handlers)
+      return () => undefined
+    }),
+    share: vi.fn(async (_uid: string, _noteId: string, _ownerEmail: string, _email: string) => undefined),
+    acceptShare: vi.fn(async (_ownerUid: string, _noteId: string, _email: string, _prefs: object) => undefined),
+    removeShare: vi.fn(async (_ownerUid: string, _noteId: string, _email: string) => undefined),
     newId: () => `new${++seq}`,
     write: vi.fn(async (_uid: string, _ops: WriteOp[]) => undefined),
     uploadFile: vi.fn(),
@@ -39,30 +53,39 @@ const fake = vi.hoisted(() => {
 vi.mock('../lib/backend', () => ({ backend: fake.backend, backendError: null }))
 
 import {
+  acceptInvite,
   closeNote,
   createConflictCopy,
   createFolder,
   createNote,
   deleteAttachmentFile,
+  deleteFolder,
   deleteNoteForever,
   discardRejected,
   emptyTrash,
   hasUnsyncedChanges,
   initApp,
   isPermanentUploadError,
+  leaveSharedNote,
   markDirty,
   MAX_UPLOAD_BYTES,
+  moveNote,
+  openNote,
   QUEUED_UPLOAD_KEY,
   referencedPaths,
   registerFlush,
+  rejectInvite,
   rejectedVersion,
   renameFolder,
   selectSyncStatus,
   setColor,
   setNoteOrder,
   setPinned,
+  shareNote,
   signIn,
   signOut,
+  stopSharing,
+  trashNote,
   updateNote,
   UPLOAD_KEY,
   uploadAttachment,
@@ -108,6 +131,7 @@ const writtenOps = () => fake.backend.write.mock.calls.flatMap(([, ops]) => ops)
 const writtenData = () =>
   writtenOps().map((op) => (op.type === 'setNote' ? (op.data as Partial<Note>) : {}))
 const lastHandlers = () => fake.state.handlers[fake.state.handlers.length - 1]
+const sharedHandlers = () => fake.state.shared[fake.state.shared.length - 1]
 
 beforeAll(() => initApp())
 
@@ -704,5 +728,146 @@ describe('a rejection that arrives while signing out', () => {
     expect(Object.keys(localStorage).filter((key) => key.startsWith('kaze:rejected:'))).toEqual([])
     finish()
     await leaving
+  })
+})
+
+describe('notes shared with me', () => {
+  const shared = (id: string, patch: Partial<Note> = {}) =>
+    note(id, { ownerUid: 'u2', ownerEmail: 'bob@example.com', members: ['ana@example.com'], ...patch })
+
+  it('lists them next to my own notes, keeps them over my own snapshots and hides the ones their owner trashed', () => {
+    lastHandlers().notes([note('mine')], meta)
+    sharedHandlers().notes([shared('s1'), shared('s2', { trashed: true })], meta)
+    expect(Object.keys(useApp.getState().notes).sort()).toEqual(['mine', 's1'])
+    lastHandlers().notes([note('mine'), note('mine2')], meta)
+    expect(Object.keys(useApp.getState().notes).sort()).toEqual(['mine', 'mine2', 's1'])
+  })
+
+  it("sends my edits to the owner's note: text and color on the note, folder, order, pin and lock under my email", async () => {
+    lastHandlers().folders([{ id: 'f', name: 'F', parentId: null, order: 'a0', createdAt: 1, updatedAt: 1 }], meta)
+    sharedHandlers().notes([shared('s1')], meta)
+    updateNote('s1', { title: 'New' })
+    setPinned('s1', true)
+    setColor('s1', 'sky')
+    moveNote('s1', 'f', 'a3')
+    await settle()
+    expect(writtenOps()).toEqual([
+      { type: 'setSharedNote', owner: 'u2', id: 's1', data: expect.objectContaining({ title: 'New', rev: 1, baseRev: 0 }) },
+      { type: 'setSharedNote', owner: 'u2', id: 's1', data: { prefs: { 'ana@example.com': { pinned: true } } } },
+      { type: 'setSharedNote', owner: 'u2', id: 's1', data: { color: 'sky' } },
+      { type: 'setSharedNote', owner: 'u2', id: 's1', data: { prefs: { 'ana@example.com': { folderId: 'f', order: 'a3' } } } },
+    ])
+    expect(useApp.getState().notes.s1).toMatchObject({ title: 'New', pinned: true, color: 'sky', folderId: 'f', ownerUid: 'u2' })
+  })
+
+  it('never trashes or deletes a note shared with me; deleting my folder moves it to the root and trashes my own notes', async () => {
+    lastHandlers().folders([{ id: 'f', name: 'F', parentId: null, order: 'a0', createdAt: 1, updatedAt: 1 }], meta)
+    lastHandlers().notes([note('mine', { folderId: 'f' })], meta)
+    sharedHandlers().notes([shared('s1', { folderId: 'f' })], meta)
+    trashNote('s1')
+    deleteNoteForever('s1')
+    deleteFolder('f')
+    await settle()
+    expect(writtenOps()).toEqual([
+      { type: 'setNote', id: 'mine', data: expect.objectContaining({ trashed: true }) },
+      { type: 'setSharedNote', owner: 'u2', id: 's1', data: { prefs: { 'ana@example.com': { folderId: null } } } },
+      { type: 'deleteFolder', id: 'f' },
+    ])
+    expect(fake.backend.deleteNoteFiles).not.toHaveBeenCalled()
+    expect(useApp.getState().notes.s1).toMatchObject({ trashed: false, folderId: null })
+  })
+
+  it('closing an empty note that is shared (mine or not) keeps it', async () => {
+    const empty = { title: '', content: '' }
+    lastHandlers().notes([note('mine', { ...empty, members: ['bob@example.com'] })], meta)
+    sharedHandlers().notes([shared('s1', empty)], meta)
+    openNote('s1')
+    openNote('mine')
+    closeNote()
+    await settle()
+    expect(writtenOps()).toEqual([])
+  })
+
+  it('removing an attachment uploaded by another account leaves its file alone', async () => {
+    sharedHandlers().notes([shared('s1')], meta)
+    await deleteAttachmentFile('users/u2/notes/s1/x.pdf', 's1')
+    expect(fake.backend.deleteFile).not.toHaveBeenCalled()
+  })
+
+  it('leaving a shared note removes me from it, closes it and hides it at once', () => {
+    sharedHandlers().notes([shared('s1')], meta)
+    openNote('s1')
+    leaveSharedNote('s1')
+    expect(fake.backend.removeShare).toHaveBeenCalledWith('u2', 's1', 'ana@example.com')
+    expect(useApp.getState().view.kind).toBe('notes')
+    expect(useApp.getState().notes.s1).toBeUndefined()
+  })
+
+  it('a failing shared listener shows an error and only that listener subscribes again after 10 s', async () => {
+    vi.useFakeTimers()
+    const own = fake.backend.subscribe.mock.calls.length
+    const sharedCount = fake.backend.subscribeShared.mock.calls.length
+    sharedHandlers().error(new Error('index missing'))
+    expect(useApp.getState().sync.error).toBe('index missing')
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(fake.backend.subscribeShared).toHaveBeenCalledTimes(sharedCount + 1)
+    expect(fake.backend.subscribe).toHaveBeenCalledTimes(own)
+  })
+})
+
+describe('sharing my notes', () => {
+  it('invites a trimmed lowercase email', () => {
+    lastHandlers().notes([note('n1')], meta)
+    expect(shareNote('n1', ' Bob@Example.com ')).toBeNull()
+    expect(fake.backend.share).toHaveBeenCalledWith('u1', 'n1', 'ana@example.com', 'bob@example.com')
+  })
+
+  it('refuses an invalid email, my own email and someone already invited or a member', () => {
+    lastHandlers().notes([note('n1', { invited: ['c@example.com'], members: ['d@example.com'] })], meta)
+    for (const email of ['nope', 'ANA@example.com', 'c@example.com', 'd@example.com']) expect(shareNote('n1', email)).toEqual(expect.any(String))
+    expect(fake.backend.share).not.toHaveBeenCalled()
+  })
+
+  it('only the owner adds people', () => {
+    sharedHandlers().notes([note('s1', { ownerUid: 'u2', members: ['ana@example.com'] })], meta)
+    expect(shareNote('s1', 'e@example.com')).toEqual(expect.any(String))
+    expect(fake.backend.share).not.toHaveBeenCalled()
+  })
+
+  it('stops sharing with one person', () => {
+    lastHandlers().notes([note('n1', { members: ['bob@example.com'] })], meta)
+    stopSharing('n1', 'bob@example.com')
+    expect(fake.backend.removeShare).toHaveBeenCalledWith('u1', 'n1', 'bob@example.com')
+  })
+
+  it('shows an error when the cloud refuses a sharing change', async () => {
+    lastHandlers().notes([note('n1')], meta)
+    fake.backend.share.mockRejectedValueOnce(new Error('permission-denied'))
+    shareNote('n1', 'bob@example.com')
+    await settle()
+    expect(useApp.getState().sync.error).toBe('permission-denied')
+  })
+})
+
+describe('invitations', () => {
+  const invite: Invite = { noteId: 's1', ownerUid: 'u2', ownerEmail: 'bob@example.com' }
+
+  it('accepting adds me to the note first in All notes, without folder, pin or lock, and clears the invitation', () => {
+    lastHandlers().notes([note('mine', { order: 'a5' })], meta)
+    sharedHandlers().invites([invite])
+    expect(useApp.getState().invites).toEqual([invite])
+    acceptInvite(invite)
+    const [ownerUid, noteId, email, prefs] = fake.backend.acceptShare.mock.calls[0]
+    expect([ownerUid, noteId, email]).toEqual(['u2', 's1', 'ana@example.com'])
+    expect(prefs).toEqual({ folderId: null, order: expect.any(String), pinned: false, locked: false })
+    expect((prefs as { order: string }).order < 'a5').toBe(true)
+    expect(useApp.getState().invites).toEqual([])
+  })
+
+  it('rejecting removes me from the note and clears the invitation', () => {
+    sharedHandlers().invites([invite])
+    rejectInvite(invite)
+    expect(fake.backend.removeShare).toHaveBeenCalledWith('u2', 's1', 'ana@example.com')
+    expect(useApp.getState().invites).toEqual([])
   })
 })

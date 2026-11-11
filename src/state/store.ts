@@ -7,6 +7,7 @@ import { hasContent, parseContent, previewFromDoc } from '../lib/docText'
 import { t } from '../lib/i18n'
 import { keyBetween } from '../lib/order'
 import { deleteUpload, listUploads, pendingUploadCount } from '../lib/outbox'
+import { isShared, isValidEmail, normalizeEmail, sharedWrite, type Invite } from '../lib/sharing'
 import { activeNotes, childFolders, descendantFolderIds, isInsideFolder, trashedNotes } from '../lib/tree'
 import type { AppUser, Folder, LayoutMode, Note, NoteColorId, ThemePref, View } from '../lib/types'
 import { clearCachedFiles } from '../pwa/registerServiceWorker'
@@ -49,6 +50,8 @@ export interface AppState {
   search: string
   /** Nota protegida desbloqueada mientras está abierta (se vuelve a bloquear al salir de ella). */
   unlockedNoteId: string | null
+  /** Invitaciones pendientes a notas de otros usuarios. */
+  invites: Invite[]
   sync: SyncState
 }
 
@@ -96,6 +99,7 @@ export const useApp = create<AppState>(() => ({
   theme: readTheme(),
   search: '',
   unlockedNoteId: null,
+  invites: [],
   sync: {
     online: typeof navigator === 'undefined' ? true : navigator.onLine,
     serverPending: false,
@@ -211,14 +215,30 @@ function isStale(op: WriteOp): boolean {
   return op.type === 'setNote' ? !notes[op.id] : !folders[op.id]
 }
 
+/** Dueño de una nota compartida conmigo (undefined si es mía). */
+const foreignOwner = (id: string) => get().notes[id]?.ownerUid
+
+/**
+ * Cambio tal y como se envía: el de una nota compartida conmigo va a la nota de su dueño, con lo personal en mis
+ * preferencias y sin lo que no puedo cambiar.
+ */
+function toSend(op: WriteOp, email: string): WriteOp {
+  if (op.type !== 'setNote') return op
+  const owner = foreignOwner(op.id)
+  return owner ? { type: 'setSharedNote', owner, id: op.id, data: sharedWrite(op.data, email) } : op
+}
+
 /** Aplica los cambios en local al instante (optimista) y los envía a la nube. */
 function commit(allOps: WriteOp[]) {
   const user = get().user
-  const ops = allOps.filter((op) => !isStale(op))
+  // Una nota compartida conmigo solo la borra su dueño.
+  const ops = allOps.filter((op) => !isStale(op) && !(op.type === 'deleteNote' && foreignOwner(op.id)))
   if (!user || !backend || ops.length === 0) return
+  // Se calcula antes de aplicar en local: el dueño de cada nota sale del estado actual.
+  const send = ops.map((op) => toSend(op, user.email ?? ''))
   applyLocal(ops)
   const seq = ++writeSeq
-  backend.write(user.uid, ops).then(
+  backend.write(user.uid, send).then(
     () => {
       clearTransientError()
       settleRejected(user.uid, ops, seq, null)
@@ -344,7 +364,11 @@ function sameNote(a: Note, b: Note) {
     a.trashed === b.trashed &&
     a.title === b.title &&
     a.content === b.content &&
-    a.rev === b.rev
+    a.rev === b.rev &&
+    a.ownerUid === b.ownerUid &&
+    a.ownerEmail === b.ownerEmail &&
+    String(a.members) === String(b.members) &&
+    String(a.invited) === String(b.invited)
   )
 }
 
@@ -404,7 +428,23 @@ const RELOCK_AFTER_HIDDEN_MS = 60_000
 
 let unsubscribeData: (() => void) | null = null
 let resubscribeTimer: ReturnType<typeof setTimeout> | undefined
+let unsubscribeShared: (() => void) | null = null
+let resubscribeSharedTimer: ReturnType<typeof setTimeout> | undefined
 let initialized = false
+
+// Últimas listas recibidas: mis notas y las de otros compartidas conmigo (se muestran juntas).
+let ownNotes: Note[] = []
+let sharedNotes: Note[] = []
+
+function refreshNotes() {
+  const prev = get().notes
+  const mine = new Set(ownNotes.map((n) => n.id))
+  const list = [...ownNotes, ...sharedNotes.filter((n) => !mine.has(n.id))]
+  set((s) => ({ notes: mergeRecord(s.notes, list, sameNote) }))
+  keepOverwritten(prev, list)
+}
+
+const sameInvites = (a: Invite[], b: Invite[]) => JSON.stringify(a) === JSON.stringify(b)
 
 export function initApp() {
   if (initialized) return
@@ -448,6 +488,12 @@ export function initApp() {
     unsubscribeData = null
     clearTimeout(resubscribeTimer)
     resubscribeTimer = undefined
+    unsubscribeShared?.()
+    unsubscribeShared = null
+    clearTimeout(resubscribeSharedTimer)
+    resubscribeSharedTimer = undefined
+    ownNotes = []
+    sharedNotes = []
     // Los errores eran de la sesión anterior o del inicio de sesión que ahora sí ha funcionado.
     set((s) => ({
       user,
@@ -456,6 +502,7 @@ export function initApp() {
       notes: {},
       folders: {},
       unlockedNoteId: null,
+      invites: [],
       sync: (() => {
         const rejected = user ? storedRejected(user.uid) : {}
         const error = Object.keys(rejected).length > 0 ? rejectedMessage() : null
@@ -466,10 +513,11 @@ export function initApp() {
 
     let notesMeta: SnapshotMeta | null = null
     let foldersMeta: SnapshotMeta | null = null
+    let sharedMeta: SnapshotMeta | null = null
     const updateMeta = () => {
       setSync({
-        serverPending: Boolean(notesMeta?.pendingWrites || foldersMeta?.pendingWrites),
-        fromCache: Boolean(notesMeta?.fromCache || foldersMeta?.fromCache),
+        serverPending: Boolean(notesMeta?.pendingWrites || foldersMeta?.pendingWrites || sharedMeta?.pendingWrites),
+        fromCache: Boolean(notesMeta?.fromCache || foldersMeta?.fromCache || sharedMeta?.fromCache),
       })
       if (notesMeta && foldersMeta && !get().dataReady) {
         set({ dataReady: true })
@@ -484,9 +532,8 @@ export function initApp() {
         notes: (list, meta) => {
           notesMeta = meta
           received()
-          const prev = get().notes
-          set((s) => ({ notes: mergeRecord(s.notes, list, sameNote) }))
-          keepOverwritten(prev, list)
+          ownNotes = list
+          refreshNotes()
           updateMeta()
         },
         folders: (list, meta) => {
@@ -508,6 +555,36 @@ export function initApp() {
       })
     }
     subscribe()
+
+    // Notas compartidas conmigo e invitaciones: con su propia escucha, para que un fallo aquí (p. ej. un índice que
+    // aún se está creando) no corte la de mis datos.
+    const email = user.email
+    const subscribeShared = () => {
+      if (!email) return
+      unsubscribeShared = api.subscribeShared(user.uid, email, {
+        notes: (list, meta) => {
+          sharedMeta = meta
+          // La que su dueño manda a la papelera deja de verse.
+          sharedNotes = list.filter((n) => !n.trashed)
+          refreshNotes()
+          updateMeta()
+        },
+        invites: (list) => {
+          if (!sameInvites(get().invites, list)) set({ invites: list })
+        },
+        error: (error) => {
+          setSync({ error: error.message })
+          if (resubscribeSharedTimer) return
+          unsubscribeShared?.()
+          unsubscribeShared = null
+          resubscribeSharedTimer = setTimeout(() => {
+            resubscribeSharedTimer = undefined
+            subscribeShared()
+          }, RESUBSCRIBE_MS)
+        },
+      })
+    }
+    subscribeShared()
   })
 }
 
@@ -582,7 +659,9 @@ function leaveCurrentNote() {
   const note = notes[view.noteId]
   // Una nota cuyo guardado se rechazó por grande no está vacía aunque lo parezca aquí.
   const refused = sync.tooLarge.includes(view.noteId)
-  if (note && !note.trashed && !refused && !note.title.trim() && !hasContent(parseContent(note.content))) {
+  // Una nota compartida no se descarta: puede que la otra persona la esté usando.
+  const empty = note && !note.title.trim() && !hasContent(parseContent(note.content))
+  if (note && empty && !note.trashed && !refused && !note.ownerUid && !isShared(note)) {
     // También se borran los ficheros que subió y ya no usa (p. ej. un adjunto quitado con retroceso).
     deleteNoteForever(note.id)
   }
@@ -798,12 +877,17 @@ export function removeNoteLock(id: string) {
   commit([{ type: 'setNote', id, data: { locked: false } }])
 }
 
+/** Si la nota está abierta, envía lo pendiente y vuelve a la lista. */
+function leaveIfViewing(id: string) {
+  if (!isViewing(id)) return
+  flushAll()
+  set((s) => ({ view: { kind: 'notes', folderId: s.lastFolderId }, fullscreen: false, unlockedNoteId: null }))
+}
+
 export function trashNote(id: string) {
-  const { view } = get()
-  if (view.kind === 'note' && view.noteId === id) {
-    flushAll()
-    set((s) => ({ view: { kind: 'notes', folderId: s.lastFolderId }, fullscreen: false, unlockedNoteId: null }))
-  }
+  // Una nota compartida conmigo no va a mi papelera: se deja de compartir.
+  if (foreignOwner(id)) return
+  leaveIfViewing(id)
   commit([{ type: 'setNote', id, data: { trashed: true, trashedAt: Date.now() } }])
 }
 
@@ -843,6 +927,8 @@ function forgetTooLarge(ids: string[]) {
 
 /** Borra la nota y sus ficheros, salvo los que otras notas siguen usando (adjuntos copiados). */
 export function deleteNoteForever(id: string) {
+  // Solo su dueño borra una nota compartida (y sus ficheros, que están en la cuenta de quien los subió).
+  if (foreignOwner(id)) return
   const user = get().user
   const keep = referencedPaths(id)
   commit([{ type: 'deleteNote', id }])
@@ -931,7 +1017,8 @@ function resumeQueuedUploads() {
  */
 export async function deleteAttachmentFile(path: string, noteId: string): Promise<void> {
   const user = get().user
-  if (!user || !backend || !path) return
+  // Un adjunto que subió otra cuenta (en una nota compartida) es suyo: se queda en su almacenamiento.
+  if (!user || !backend || !path || !path.startsWith(`users/${user.uid}/`)) return
   // Se guarda antes la nota abierta para que su contenido ya no incluya el adjunto quitado.
   flushAll()
   if (notePaths(get().notes[noteId]).has(path) || referencedPaths(noteId).has(path)) return
@@ -982,7 +1069,7 @@ export function moveFolder(id: string, parentId: string | null, order: string): 
   return true
 }
 
-/** Borra la carpeta y sus subcarpetas; sus notas van a la papelera. */
+/** Borra la carpeta y sus subcarpetas; sus notas van a la papelera (las compartidas conmigo, a la raíz). */
 export function deleteFolder(id: string) {
   const { folders, notes, view, lastFolderId } = get()
   const ids = descendantFolderIds(folders, id)
@@ -990,7 +1077,11 @@ export function deleteFolder(id: string) {
   const ops: WriteOp[] = [
     ...activeNotes(notes)
       .filter((n) => n.folderId && ids.includes(n.folderId))
-      .map((n) => ({ type: 'setNote' as const, id: n.id, data: { trashed: true, trashedAt: now } })),
+      .map((n) => ({
+        type: 'setNote' as const,
+        id: n.id,
+        data: n.ownerUid ? { folderId: null } : { trashed: true, trashedAt: now },
+      })),
     ...ids.map((fid) => ({ type: 'deleteFolder' as const, id: fid })),
   ]
   if (lastFolderId && ids.includes(lastFolderId)) set({ lastFolderId: null })
@@ -1003,4 +1094,66 @@ export function deleteFolder(id: string) {
     set({ view: { kind: 'notes', folderId: null }, fullscreen: false })
   }
   commit(ops)
+}
+
+// ---------- Compartir ----------
+
+/** Envía un cambio de compartir; si la nube lo rechaza, se muestra el error. */
+function sendShare(change: Promise<void>) {
+  change.then(clearTransientError, (error: unknown) => setSync({ error: error instanceof Error ? error.message : String(error) }))
+}
+
+/** Invita a `rawEmail` a una nota mía. Devuelve el motivo si no se puede, o null si se ha enviado. */
+export function shareNote(id: string, rawEmail: string): string | null {
+  const { user, notes } = get()
+  const note = notes[id]
+  if (!user?.email || !backend || !note) return t("The note couldn't be shared", 'No se ha podido compartir la nota')
+  if (note.ownerUid) return t('Only the owner of the note can add people', 'Solo quien creó la nota puede añadir a más gente')
+  const email = normalizeEmail(rawEmail)
+  if (!isValidEmail(email)) return t('Enter a valid email', 'Escribe un correo válido')
+  if (email === normalizeEmail(user.email)) return t("That's your own email", 'Ese es tu propio correo')
+  if (note.members?.includes(email) || note.invited?.includes(email)) {
+    return t('The note is already shared with this person', 'La nota ya está compartida con esta persona')
+  }
+  sendShare(backend.share(user.uid, id, user.email, email))
+  return null
+}
+
+/** El dueño deja de compartir la nota con `email` (aceptado o pendiente). */
+export function stopSharing(id: string, email: string) {
+  const { user, notes } = get()
+  if (!user || !backend || !notes[id] || notes[id].ownerUid) return
+  sendShare(backend.removeShare(user.uid, id, email))
+}
+
+/** Deja de ver una nota compartida conmigo: vuelve a ser solo de su dueño. */
+export function leaveSharedNote(id: string) {
+  const { user } = get()
+  const owner = foreignOwner(id)
+  if (!user?.email || !backend || !owner) return
+  // Lo pendiente del editor se envía antes de salir de la nota.
+  leaveIfViewing(id)
+  sendShare(backend.removeShare(owner, id, user.email))
+  sharedNotes = sharedNotes.filter((n) => n.id !== id)
+  refreshNotes()
+}
+
+const dropInvite = (invite: Invite) =>
+  set((s) => ({ invites: s.invites.filter((i) => i.noteId !== invite.noteId || i.ownerUid !== invite.ownerUid) }))
+
+/** Acepta una invitación: la nota aparece la primera en "Todas las notas", sin carpeta, sin fijar y sin proteger. */
+export function acceptInvite(invite: Invite) {
+  const { user } = get()
+  if (!user?.email || !backend) return
+  const first = activeNotes(get().notes)[0]
+  const prefs = { folderId: null, order: keyBetween(null, first?.order), pinned: false, locked: false }
+  sendShare(backend.acceptShare(invite.ownerUid, invite.noteId, user.email, prefs))
+  dropInvite(invite)
+}
+
+export function rejectInvite(invite: Invite) {
+  const { user } = get()
+  if (!user?.email || !backend) return
+  sendShare(backend.removeShare(invite.ownerUid, invite.noteId, user.email))
+  dropInvite(invite)
 }
