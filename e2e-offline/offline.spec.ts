@@ -100,3 +100,32 @@ test('offers the new version after reconnecting and keeps what was being typed (
     writeFileSync(SW_FILE, original)
   }
 })
+
+test('the app works under the production Content-Security-Policy (firebase.json)', async ({ page }) => {
+  // Se recogen las infracciones de la CSP desde antes de cargar la app.
+  await page.addInitScript(() => {
+    const seen: string[] = []
+    ;(window as unknown as { cspViolations: string[] }).cspViolations = seen
+    document.addEventListener('securitypolicyviolation', (e) => seen.push(`${e.violatedDirective} ${e.blockedURI}`))
+  })
+  const response = await page.goto('/')
+  expect(response?.headers()['content-security-policy']).toContain("default-src 'self'")
+  await page.getByRole('button', { name: /Google/ }).click()
+  await expect(page.locator('.sidebar')).toBeVisible()
+  await newNote(page, 'Con CSP', 'texto en negrita')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+B' : 'Control+B')
+  await expect(page.locator('.ProseMirror strong')).toHaveText('texto en negrita')
+  // Imagen adjunta: vista previa local (blob:) mientras se sube.
+  await page.locator('.note-editor input[type="file"]').setInputFiles({
+    name: 'punto.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'),
+  })
+  await expect(page.locator('.ProseMirror .attachment img')).toBeVisible()
+  await backToNotes(page)
+  await waitForOfflineReady(page)
+  await page.reload()
+  await expect(page.locator('.sidebar')).toBeVisible()
+  expect(await page.evaluate(() => (window as unknown as { cspViolations: string[] }).cspViolations)).toEqual([])
+})
