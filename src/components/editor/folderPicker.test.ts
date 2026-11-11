@@ -30,9 +30,13 @@ describe('folderTree', () => {
     ])
   })
 
-  it('survives a parent cycle without looping', () => {
-    const cyclic = { a: folder('a', 'A', 'b', 'a0'), b: folder('b', 'B', 'a', 'a0') }
-    expect(folderTree(cyclic)).toEqual([])
+  it('shows folders in a parent cycle at the top level, with their subfolders below', () => {
+    const cyclic = { a: folder('a', 'A', 'b', 'a0'), b: folder('b', 'B', 'a', 'a1'), c: folder('c', 'C', 'a', 'a0') }
+    expect(folderTree(cyclic).map((f) => [f.id, f.depth, f.path])).toEqual([
+      ['a', 0, 'A'],
+      ['c', 1, 'A / C'],
+      ['b', 0, 'B'],
+    ])
   })
 })
 

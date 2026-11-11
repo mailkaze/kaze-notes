@@ -1,4 +1,5 @@
 import type { AppUser, Folder, Note } from '../types'
+import { uploadPath } from './firebase'
 import type { Backend, SnapshotMeta, WriteOp } from './types'
 
 /**
@@ -109,7 +110,7 @@ export function createMemoryBackend(): Backend {
       )
     },
 
-    uploadFile(_uid, _noteId, file, onProgress) {
+    uploadFile(uid, noteId, file, onProgress) {
       return new Promise((resolve) => {
         let progress = 0
         const timer = setInterval(() => {
@@ -117,7 +118,8 @@ export function createMemoryBackend(): Backend {
           onProgress?.(progress)
           if (progress >= 1) {
             clearInterval(timer)
-            resolve({ url: URL.createObjectURL(file), path: `memory/${file.name}` })
+            // Misma ruta que en Firebase: así un adjunto copiado a otra nota se reconoce como propio.
+            resolve({ url: URL.createObjectURL(file), path: uploadPath(uid, noteId, file.name) })
           }
         }, 120)
       })

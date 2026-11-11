@@ -25,5 +25,9 @@ export function keyBetween(before: string | null | undefined, after: string | nu
  */
 export function keyForIndex(list: readonly Ordered[], index: number): string {
   const i = Math.max(0, Math.min(index, list.length))
-  return keyBetween(list[i - 1]?.order, list[i]?.order)
+  const before = list[i - 1]?.order
+  // Entre dos claves iguales no cabe ninguna: va justo después de las repetidas, antes de la siguiente distinta.
+  let next = i
+  while (before !== undefined && next < list.length && list[next].order <= before) next++
+  return keyBetween(before, list[next]?.order)
 }

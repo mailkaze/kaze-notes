@@ -84,6 +84,35 @@ function dataAttr(name: string, parse: (value: string | null) => unknown = (v) =
   }
 }
 
+/** true si `url` es la dirección de `path` en el almacenamiento de la app (o un fichero local de esta pestaña). */
+function isOwnFileUrl(url: string, path: string): boolean {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === 'blob:') return parsed.origin === window.location.origin
+    const bucket = import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string | undefined
+    return (
+      Boolean(bucket) &&
+      parsed.origin === 'https://firebasestorage.googleapis.com' &&
+      decodeURIComponent(parsed.pathname) === `/v0/b/${bucket}/o/${path}`
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Fichero de un adjunto pegado o soltado como HTML. Solo se fía de los ficheros de la cuenta abierta:
+ * un adjunto falso copiado de una web no carga imágenes remotas ni abre enlaces ajenos.
+ */
+function pastedFile(element: HTMLElement): Pick<AttachmentAttrs, 'url' | 'path' | 'status'> {
+  const uid = useApp.getState().user?.uid
+  const path = element.getAttribute('data-path')
+  const url = element.getAttribute('data-url') ?? ''
+  if (!uid || !path?.startsWith(`users/${uid}/`)) return { url: '', path: null, status: 'error' }
+  if (!isOwnFileUrl(url, path)) return { url: '', path, status: 'error' }
+  return { url, path, status: (element.getAttribute('data-status') as AttachmentStatus | null) || 'done' }
+}
+
 /** Adjunto en línea: se queda en el punto del texto donde se soltó. */
 export const Attachment = Node.create({
   name: 'attachment',
@@ -97,12 +126,12 @@ export const Attachment = Node.create({
     return {
       // Un adjunto pegado o soltado como HTML es otra copia: id nuevo, mismo fichero.
       id: { default: '', parseHTML: () => newId(), renderHTML: (attrs) => ({ 'data-id': attrs.id }) },
-      url: { default: '', ...dataAttr('url') },
-      path: { default: null, ...dataAttr('path', (v) => v || null) },
+      url: { default: '', ...dataAttr('url'), parseHTML: (element: HTMLElement) => pastedFile(element).url },
+      path: { default: null, ...dataAttr('path'), parseHTML: (element: HTMLElement) => pastedFile(element).path },
       name: { default: '', ...dataAttr('name') },
       mime: { default: '', ...dataAttr('mime') },
       size: { default: 0, ...dataAttr('size', (v) => Number(v) || 0) },
-      status: { default: 'done', ...dataAttr('status', (v) => v || 'done') },
+      status: { default: 'done', ...dataAttr('status'), parseHTML: (element: HTMLElement) => pastedFile(element).status },
     }
   },
 

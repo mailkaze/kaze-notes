@@ -4,6 +4,7 @@ import { ExternalLink, Italic, List, Paperclip, SquareCheck, Strikethrough, Unde
 import type { ReactNode } from 'react'
 import { t } from '../../lib/i18n'
 import { BoldIcon } from '../ui/controls'
+import { canOpenUrl } from './attachment'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent)
 const MOD = isMac ? '⌘' : 'Ctrl+'
@@ -96,7 +97,8 @@ export function FormatToolbar({ editor, onAttach }: { editor: Editor; onAttach: 
       <ToolButton label={t('Attach file', 'Adjuntar archivo')} onClick={onAttach}>
         <Paperclip size={17} />
       </ToolButton>
-      {state.link && (
+      {/* Solo enlaces web: nunca "javascript:" ni otros esquemas que pudiera traer una nota sincronizada. */}
+      {canOpenUrl(state.link) && (
         <ToolButton
           label={t('Open link', 'Abrir enlace')}
           onClick={() => window.open(state.link, '_blank', 'noopener,noreferrer')}

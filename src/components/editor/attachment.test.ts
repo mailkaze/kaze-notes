@@ -22,9 +22,13 @@ vi.mock('../../state/store', async (importOriginal) => ({
   uploadAttachment: vi.fn(),
 }))
 
+const BUCKET = 'kaze-test.appspot.com'
+const storageUrl = (path: string, bucket = BUCKET) =>
+  `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media&token=t1`
+
 const attrs: AttachmentAttrs = {
   id: 'a1',
-  url: 'https://files/informe.pdf',
+  url: storageUrl('users/u/notes/n/informe.pdf'),
   path: 'users/u/notes/n/informe.pdf',
   name: 'informe.pdf',
   mime: 'application/pdf',
@@ -99,6 +103,49 @@ describe('deleting an attachment permanently', () => {
 })
 
 describe('copying attachments', () => {
+  beforeEach(() => {
+    vi.stubEnv('VITE_FIREBASE_STORAGE_BUCKET', BUCKET)
+    useApp.setState({ user: { uid: 'u', name: 'U', email: 'u@example.com', photoURL: null } })
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    useApp.setState({ user: null })
+  })
+
+  function pasteChip(data: Record<string, string>): AttachmentAttrs {
+    const attributes = Object.entries({ name: 'foto.png', mime: 'image/png', size: '10', status: 'done', ...data })
+      .map(([key, value]) => ` data-${key}="${value}"`)
+      .join('')
+    const other = makeEditor('<p></p>')
+    other.view.pasteHTML(`<p><span data-attachment${attributes}>📎 foto.png</span></p>`, new Event('paste') as ClipboardEvent)
+    const [pasted] = chips(other)
+    other.destroy()
+    return pasted
+  }
+
+  it('a chip pasted from elsewhere neither loads nor opens a file outside this account', () => {
+    const failed = { url: '', path: null, status: 'error', name: 'foto.png' }
+    // Imagen remota (p. ej. un píxel de seguimiento) y ruta de otra cuenta.
+    expect(pasteChip({ url: 'https://tracker.example/pixel.png', path: 'users/other/notes/n/foto.png' })).toMatchObject(failed)
+    expect(pasteChip({ url: 'https://tracker.example/pixel.png' })).toMatchObject(failed)
+    // Ruta propia con un enlace ajeno: el fichero se conserva, el enlace no.
+    const own = 'users/u/notes/n/foto.png'
+    const noLink = { ...failed, path: own }
+    expect(pasteChip({ url: 'https://tracker.example/pixel.png', path: own })).toMatchObject(noLink)
+    expect(pasteChip({ url: storageUrl(own, 'other-bucket'), path: own })).toMatchObject(noLink)
+    expect(pasteChip({ url: storageUrl('users/u/notes/n/otra.png'), path: own })).toMatchObject(noLink)
+    expect(pasteChip({ url: 'blob:https://evil.example/123', path: own })).toMatchObject(noLink)
+    expect(pasteChip({ url: 'javascript:alert(1)', path: own })).toMatchObject(noLink)
+  })
+
+  it('a chip copied inside the app keeps its file, in the cloud or in the local backend', () => {
+    const own = 'users/u/notes/n/foto.png'
+    expect(pasteChip({ url: storageUrl(own), path: own })).toMatchObject({ url: storageUrl(own), path: own, status: 'done' })
+    const local = `blob:${window.location.origin}/123`
+    expect(pasteChip({ url: local, path: own })).toMatchObject({ url: local, path: own, status: 'done' })
+  })
+
   it('a pasted attachment gets a new id but points to the same file', () => {
     const html = editor.getHTML()
     const other = makeEditor('<p></p>')

@@ -1,4 +1,5 @@
 import { byOrder } from '../../lib/order'
+import { parentFolderId } from '../../lib/tree'
 import { normalize } from '../../lib/search'
 import type { Folder } from '../../lib/types'
 
@@ -15,11 +16,11 @@ export type PickerOption =
   | ({ kind: 'folder' } & FolderOption)
   | { kind: 'create'; name: string }
 
-/** Todas las carpetas en orden de árbol (cada padre antes que sus hijas). Las huérfanas cuelgan de la raíz. */
+/** Todas las carpetas en orden de árbol (cada padre antes que sus hijas). Las huérfanas o en un ciclo cuelgan de la raíz. */
 export function folderTree(folders: Record<string, Folder>): FolderOption[] {
   const byParent = new Map<string | null, Folder[]>()
   for (const folder of Object.values(folders).sort(byOrder)) {
-    const parent = folder.parentId && folders[folder.parentId] ? folder.parentId : null
+    const parent = parentFolderId(folders, folder.id)
     byParent.set(parent, [...(byParent.get(parent) ?? []), folder])
   }
   const out: FolderOption[] = []

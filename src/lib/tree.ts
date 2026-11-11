@@ -4,15 +4,29 @@ import type { Folder, Note } from './types'
 type Folders = Record<string, Folder>
 type Notes = Record<string, Note>
 
+/**
+ * Carpeta en la que se muestra `folderId` (null = raíz). Va a la raíz si su carpeta madre ya no existe
+ * o si está en un ciclo (p. ej. dos dispositivos movieron cada una dentro de la otra), para que no desaparezca.
+ */
+export function parentFolderId(folders: Folders, folderId: string): string | null {
+  const parentId = folders[folderId]?.parentId
+  if (!parentId || !folders[parentId]) return null
+  const seen = new Set<string>()
+  for (let id: string | null = parentId; id && folders[id] && !seen.has(id); id = folders[id].parentId) {
+    if (id === folderId) return null
+    seen.add(id)
+  }
+  return parentId
+}
+
 /** Ruta de carpetas desde la raíz hasta `folderId` (incluida). Vacía si es la raíz. */
 export function folderPath(folders: Folders, folderId: string | null): Folder[] {
   const path: Folder[] = []
-  const seen = new Set<string>()
   let current = folderId ? folders[folderId] : undefined
-  while (current && !seen.has(current.id)) {
-    seen.add(current.id)
+  while (current) {
     path.unshift(current)
-    current = current.parentId ? folders[current.parentId] : undefined
+    const parentId = parentFolderId(folders, current.id)
+    current = parentId ? folders[parentId] : undefined
   }
   return path
 }
@@ -26,7 +40,7 @@ export function folderPathLabel(folders: Folders, folderId: string | null): stri
 
 export function childFolders(folders: Folders, parentId: string | null): Folder[] {
   return Object.values(folders)
-    .filter((f) => f.parentId === parentId)
+    .filter((f) => parentFolderId(folders, f.id) === parentId)
     .sort(byOrder)
 }
 

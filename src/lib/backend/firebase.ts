@@ -75,6 +75,14 @@ function safeName(name: string): string {
   return name.replace(/[\\/#?[\]*]+/g, '_').slice(-120) || 'file'
 }
 
+/**
+ * Ruta de un adjunto nuevo en Storage. Lleva un trozo aleatorio para que dos ficheros con el mismo nombre
+ * subidos a la vez (p. ej. varias "image.png" pegadas en iOS) no se pisen.
+ */
+export function uploadPath(uid: string, noteId: string, fileName: string): string {
+  return `users/${uid}/notes/${noteId}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${safeName(fileName)}`
+}
+
 // Firestore admite como máximo 500 operaciones por lote.
 const BATCH_LIMIT = 450
 // Tiempo máximo que se esperan las escrituras pendientes antes de cerrar sesión.
@@ -191,7 +199,7 @@ export function createFirebaseBackend(): Backend {
     },
 
     uploadFile(uid, noteId, file, onProgress) {
-      const path = `users/${uid}/notes/${noteId}/${Date.now()}-${safeName(file.name)}`
+      const path = uploadPath(uid, noteId, file.name)
       const task = uploadBytesResumable(ref(storage, path), file, {
         contentType: file.type || 'application/octet-stream',
         contentDisposition: `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`,

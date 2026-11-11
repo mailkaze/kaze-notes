@@ -159,21 +159,28 @@ function isBoundary(ch: string | undefined): boolean {
   return ch === undefined || /[\s\p{P}\p{S}]/u.test(ch)
 }
 
-function isOpening(s: string, i: number): boolean {
-  return isBoundary(s[i - 1]) && i + 1 < s.length && !/\s/.test(s[i + 1])
-}
+/** Para cada marcador, la primera posición desde cada índice en la que puede cerrar (-1 si no hay). */
+type Closings = Record<string, Int32Array>
 
-function closingIndex(s: string, open: number): number {
-  const marker = s[open]
-  for (let j = open + 2; j < s.length; j++) {
-    if (s[j] === marker && !/\s/.test(s[j - 1]) && isBoundary(s[j + 1])) return j
+// Se calcula una vez por línea para no recorrerla entera por cada marcador de apertura.
+function closings(s: string): Closings {
+  const table: Closings = {}
+  for (const { marker } of FORMATS) {
+    const next = new Int32Array(s.length + 1).fill(-1)
+    for (let j = s.length - 1; j >= 0; j--) {
+      next[j] = s[j] === marker && !/\s/.test(s[j - 1]) && isBoundary(s[j + 1]) ? j : next[j + 1]
+    }
+    table[marker] = next
   }
-  return -1
+  return table
 }
 
-function formatAt(s: string, i: number): Format | undefined {
+/** Formato que abre en `i` y su cierre, que tiene que quedar antes de `end`. */
+function formatAt(s: string, i: number, end: number, next: Closings): { format: Format; close: number } | undefined {
   const format = FORMATS.find((f) => f.marker === s[i])
-  return format && isOpening(s, i) && closingIndex(s, i) > 0 ? format : undefined
+  if (!format || !isBoundary(s[i - 1]) || i + 1 >= end || /\s/.test(s[i + 1])) return undefined
+  const close = next[format.marker][i + 2]
+  return close >= 0 && close < end ? { format, close } : undefined
 }
 
 /** Sustituye los enlaces por `LINK_SLOT` para que sus caracteres no cuenten como marcadores. */
@@ -198,25 +205,28 @@ function inlineToHtml(line: string): string {
       const link = links[next++]
       return link ? `<a href="${escapeHtml(link.href)}">${escapeHtml(link.text)}</a>` : ''
     })
-  const parse = (s: string): string => {
+  const closes = closings(masked)
+  // Convierte el tramo [from, to) de la línea.
+  const parse = (from: number, to: number): string => {
     let out = ''
-    let start = 0
-    for (let i = 0; i < s.length; i++) {
-      const format = formatAt(s, i)
-      if (!format) continue
-      const end = closingIndex(s, i)
-      out += plain(s.slice(start, i)) + `<${format.tag}>` + parse(s.slice(i + 1, end)) + `</${format.tag}>`
-      start = end + 1
-      i = end
+    let start = from
+    for (let i = from; i < to; i++) {
+      const found = formatAt(masked, i, to, closes)
+      if (!found) continue
+      const { format, close } = found
+      out += plain(masked.slice(start, i)) + `<${format.tag}>` + parse(i + 1, close) + `</${format.tag}>`
+      start = close + 1
+      i = close
     }
-    return out + plain(s.slice(start))
+    return out + plain(masked.slice(start, to))
   }
-  return parse(masked)
+  return parse(0, masked.length)
 }
 
 function hasInlineFormat(line: string): boolean {
   const { masked } = maskLinks(line)
-  for (let i = 0; i < masked.length; i++) if (formatAt(masked, i)) return true
+  const closes = closings(masked)
+  for (let i = 0; i < masked.length; i++) if (formatAt(masked, i, masked.length, closes)) return true
   return false
 }
 

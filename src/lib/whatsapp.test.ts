@@ -205,3 +205,16 @@ describe('hasFormattingHtml', () => {
     expect(hasFormattingHtml('<body><span>Hola *mundo*</span><br><img src="x"></body>')).toBe(false)
   })
 })
+
+describe('long lines', () => {
+  it('detects and converts a long line full of opening markers quickly, with the same result', () => {
+    const unclosed = ' *a'.repeat(16_000)
+    const bold = `${unclosed}*`
+    const started = performance.now()
+    expect(looksLikeWhatsApp(unclosed)).toBe(false)
+    expect(whatsAppToHtml(unclosed)).toBe(`<p>${unclosed}</p>`)
+    expect(looksLikeWhatsApp(bold)).toBe(true)
+    expect(whatsAppToHtml(bold)).toBe(`<p> <strong>a${unclosed.slice(3)}</strong></p>`)
+    expect(performance.now() - started).toBeLessThan(1000)
+  }, 60_000)
+})

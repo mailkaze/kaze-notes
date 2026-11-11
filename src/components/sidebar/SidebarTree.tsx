@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { t } from '../../lib/i18n'
 import { byOrder } from '../../lib/order'
-import { activeNotes, folderPath } from '../../lib/tree'
+import { activeNotes, folderPath, parentFolderId } from '../../lib/tree'
 import type { Folder, Note } from '../../lib/types'
 import { moveFolder, moveNote, readPref, useApp, writePref } from '../../state/store'
 import { dragEnded, dragStarted, useDragSensors } from './dnd'
@@ -27,7 +27,10 @@ interface Hit {
   ratio: number
 }
 
-/** Agrupa carpetas y notas por contenedor. Lo que apunta a una carpeta inexistente se muestra en la raíz. */
+/**
+ * Agrupa carpetas y notas por contenedor. Lo que apunta a una carpeta inexistente, y las carpetas en un ciclo,
+ * se muestran en la raíz.
+ */
 function buildTree(notes: Record<string, Note>, folders: Record<string, Folder>) {
   const foldersByParent = new Map<string | null, Folder[]>()
   const notesByFolder = new Map<string | null, Note[]>()
@@ -39,7 +42,7 @@ function buildTree(notes: Record<string, Note>, folders: Record<string, Folder>)
     else map.set(key, [value])
   }
   for (const folder of Object.values(folders).sort(byOrder)) {
-    push(foldersByParent, folder.parentId && folders[folder.parentId] ? folder.parentId : null, folder)
+    push(foldersByParent, parentFolderId(folders, folder.id), folder)
   }
   for (const note of activeNotes(notes)) {
     const folderId = note.folderId && folders[note.folderId] ? note.folderId : null
