@@ -26,7 +26,7 @@ export function SidebarToggle() {
       aria-label={t('Show sidebar', 'Mostrar barra lateral')}
       onClick={() => (isNarrow() ? setSidebarOpen(true) : setSidebarCollapsed(false))}
     >
-      <PanelLeft size={18} />
+      <PanelLeft size={21} />
     </button>
   )
 }
@@ -50,7 +50,7 @@ export function ThemeToggle() {
         : t('Theme: system', 'Tema: sistema')
   return (
     <button type="button" className="icon-btn" title={label} aria-label={label} onClick={() => setTheme(NEXT_THEME[theme])}>
-      <Icon size={18} />
+      <Icon size={21} />
     </button>
   )
 }

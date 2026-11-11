@@ -352,7 +352,7 @@
   border-radius: 0;
   background: transparent;
   color: inherit;
-  font-size: clamp(25px, calc(17px + 2.2cqi), 33px);
+  font-size: clamp(23px, calc(15px + 2.2cqi), 30px);
   font-weight: 700;
   line-height: 1.25;
   letter-spacing: -0.015em;
@@ -378,7 +378,7 @@
   flex: 1;
   min-height: 6em;
   outline: none;
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1.6;
   overflow-wrap: anywhere;
   caret-color: var(--accent);

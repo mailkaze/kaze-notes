@@ -250,7 +250,7 @@ export function FolderRow({ folder, depth }: { folder: Folder; depth: number }) 
             }}
             onDoubleClick={() => ui.setRenamingId(folder.id)}
           >
-            <Icon size={16} className="tree-folder-icon" aria-hidden />
+            <Icon size={19} className="tree-folder-icon" aria-hidden />
             <span className="tree-name">{folder.name}</span>
             {count > 0 && <span className="tree-count">{count}</span>}
           </button>
@@ -331,7 +331,7 @@ export function DragPreview({ item }: { item: DragItem }) {
   return (
     <div className="tree-drag-preview">
       {item.kind === 'folder' ? (
-        <FolderIcon size={16} aria-hidden />
+        <FolderIcon size={19} aria-hidden />
       ) : (
         <span className="tree-color" style={{ background: noteBg(color) }} aria-hidden />
       )}

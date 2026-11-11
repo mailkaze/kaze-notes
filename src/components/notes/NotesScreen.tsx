@@ -229,7 +229,7 @@ function FolderChips({ folders }: { folders: Folder[] }) {
     <nav className="folder-chips" aria-label={t('Subfolders', 'Subcarpetas')}>
       {folders.map((folder) => (
         <button key={folder.id} type="button" className="folder-chip" title={folder.name} onClick={() => openFolder(folder.id)}>
-          <FolderIcon size={15} aria-hidden />
+          <FolderIcon size={18} aria-hidden />
           <span>{folder.name}</span>
         </button>
       ))}
@@ -344,7 +344,7 @@ export function NotesScreen({ folderId }: { folderId: string | null }) {
               title={t('Grid', 'Mosaico')}
               onClick={() => setLayout('grid')}
             >
-              <LayoutGrid size={18} />
+              <LayoutGrid size={21} />
             </button>
             <button
               type="button"
@@ -355,7 +355,7 @@ export function NotesScreen({ folderId }: { folderId: string | null }) {
               title={t('List', 'Lista')}
               onClick={() => setLayout('list')}
             >
-              <List size={18} />
+              <List size={21} />
             </button>
           </div>
           <button
@@ -365,7 +365,7 @@ export function NotesScreen({ folderId }: { folderId: string | null }) {
             title={t('New note', 'Nueva nota')}
             onClick={() => createNote(folderId)}
           >
-            <SquarePen size={18} />
+            <SquarePen size={21} />
           </button>
           <SyncIndicator compact={narrow} />
         </div>

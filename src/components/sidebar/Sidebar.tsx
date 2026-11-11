@@ -97,7 +97,7 @@ export function Sidebar() {
           aria-label={t('New note', 'Nueva nota')}
           onClick={() => createNote(null)}
         >
-          <SquarePen size={18} />
+          <SquarePen size={21} />
         </button>
         <button
           type="button"
@@ -106,7 +106,7 @@ export function Sidebar() {
           aria-label={t('New folder', 'Nueva carpeta')}
           onClick={newFolder}
         >
-          <FolderPlus size={18} />
+          <FolderPlus size={21} />
         </button>
         <button
           type="button"
@@ -115,7 +115,7 @@ export function Sidebar() {
           aria-label={t('Hide sidebar', 'Ocultar barra lateral')}
           onClick={hideSidebar}
         >
-          <PanelLeftClose size={18} />
+          <PanelLeftClose size={21} />
         </button>
       </div>
 

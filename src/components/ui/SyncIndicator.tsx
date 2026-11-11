@@ -61,7 +61,7 @@ export function SyncIndicator({ compact = false }: { compact?: boolean }) {
       data-testid="sync-indicator"
       data-status={shown}
     >
-      <Icon size={15} strokeWidth={2.2} className={shown === 'syncing' ? 'spin' : undefined} aria-hidden />
+      <Icon size={17} strokeWidth={2.2} className={shown === 'syncing' ? 'spin' : undefined} aria-hidden />
       <span className={compact ? 'visually-hidden' : 'sync-label'}>{label}</span>
     </span>
   )

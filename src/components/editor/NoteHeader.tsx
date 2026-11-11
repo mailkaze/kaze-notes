@@ -230,7 +230,7 @@ export function FolderPicker({ note }: { note: Note }) {
         title={title}
         onClick={() => setOpen((v) => !v)}
       >
-        <FolderIcon size={15} aria-hidden />
+        <FolderIcon size={17} aria-hidden />
         <span className="note-folder-label">{label}</span>
         <ChevronDown size={14} className="note-folder-chevron" aria-hidden />
       </button>
@@ -264,7 +264,7 @@ export function NoteHeader({ note }: { note: Note }) {
     <header className="screen-header note-header">
       <SidebarToggle />
       <button type="button" className="icon-btn" aria-label={t('Back to notes', 'Volver a las notas')} title={t('Back to notes', 'Volver a las notas')} onClick={closeNote}>
-        <ArrowLeft size={18} />
+        <ArrowLeft size={21} />
       </button>
       <FolderPicker note={note} />
       <SyncIndicator />
@@ -277,7 +277,7 @@ export function NoteHeader({ note }: { note: Note }) {
         aria-expanded={menu === 'color'}
         onClick={() => setMenu(menu === 'color' ? null : 'color')}
       >
-        <Palette size={18} />
+        <Palette size={21} />
       </button>
       <button
         type="button"
@@ -288,7 +288,7 @@ export function NoteHeader({ note }: { note: Note }) {
         title={pinLabel}
         onClick={() => setPinned(note.id, !note.pinned)}
       >
-        {note.pinned ? <PinOff size={18} /> : <Pin size={18} />}
+        {note.pinned ? <PinOff size={21} /> : <Pin size={21} />}
       </button>
       <button
         type="button"
@@ -299,7 +299,7 @@ export function NoteHeader({ note }: { note: Note }) {
         title={lockLabel}
         onClick={() => void toggleLock(note)}
       >
-        <FingerprintPattern size={18} />
+        <FingerprintPattern size={21} />
       </button>
       <button
         type="button"
@@ -310,10 +310,10 @@ export function NoteHeader({ note }: { note: Note }) {
         title={fullscreenLabel}
         onClick={toggleFullscreen}
       >
-        {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+        {fullscreen ? <Minimize2 size={21} /> : <Maximize2 size={21} />}
       </button>
       <button type="button" className="icon-btn note-wide-only" aria-label={trashLabel} title={trashLabel} onClick={() => trashNote(note.id)}>
-        <Trash size={18} />
+        <Trash size={21} />
       </button>
       <button
         ref={setMoreButton}
@@ -324,7 +324,7 @@ export function NoteHeader({ note }: { note: Note }) {
         aria-expanded={menu === 'more'}
         onClick={() => setMenu(menu === 'more' ? null : 'more')}
       >
-        <Ellipsis size={18} />
+        <Ellipsis size={21} />
       </button>
 
       <Popover anchor={colorButton} open={menu === 'color'} onClose={close} placement="bottom-end">
