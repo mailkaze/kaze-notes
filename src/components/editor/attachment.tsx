@@ -402,6 +402,7 @@ async function upload(noteId: string, id: string, file: File, stored: Promise<un
     const { url, path } = await uploadAttachment(noteId, file, (fraction) => setProgress(id, fraction))
     if (previews.has(id)) await preload(url)
     patchAttachment(noteId, id, { url, path, status: 'done' })
+    failuresInARow = 0
   } catch (error) {
     if (stored && !isPermanentUploadError(error)) {
       if (useApp.getState().sync.online) retryLater()
@@ -448,18 +449,26 @@ function queueUpload(noteId: string, id: string, file: File) {
 
 // ---------- Cola de subidas ----------
 
-// Tras un fallo de red con conexión se reintenta pasado este tiempo.
+// Tras un fallo de red con conexión se reintenta; cada fallo seguido dobla la espera, hasta 15 minutos.
 const RETRY_MS = 30_000
+const MAX_RETRY_MS = 15 * 60_000
 let retryTimer: ReturnType<typeof setTimeout> | undefined
+let failuresInARow = 0
 let running: Promise<void> | null = null
 let runAgain = false
 
+/** Espera antes de reintentar tras `failures` fallos seguidos. */
+export function nextRetryDelay(failures: number): number {
+  return Math.min(RETRY_MS * 2 ** Math.max(0, failures - 1), MAX_RETRY_MS)
+}
+
 function retryLater() {
   if (retryTimer) return
+  failuresInARow += 1
   retryTimer = setTimeout(() => {
     retryTimer = undefined
     resumeUploads()
-  }, RETRY_MS)
+  }, nextRetryDelay(failuresInARow))
 }
 
 /** Estado guardado de un adjunto (en el editor abierto o en la nota). null si ya no está o la nota no existe. */

@@ -82,6 +82,25 @@ const BATCH_LIMIT = 450
 // Al cerrar sesión se reintenta borrar la caché local mientras las demás pestañas la sueltan.
 const CLEAR_ATTEMPTS = 6
 const CLEAR_RETRY_MS = 500
+// Marca de una caché local que no se pudo borrar al cerrar sesión: se borra al abrir la app la próxima vez.
+const CLEAR_PENDING_KEY = 'kaze:clear-local-cache'
+
+function setClearPending(pending: boolean) {
+  try {
+    if (pending) localStorage.setItem(CLEAR_PENDING_KEY, '1')
+    else localStorage.removeItem(CLEAR_PENDING_KEY)
+  } catch {
+    // Sin almacenamiento local.
+  }
+}
+
+function isClearPending(): boolean {
+  try {
+    return localStorage.getItem(CLEAR_PENDING_KEY) !== null
+  } catch {
+    return false
+  }
+}
 
 export function createFirebaseBackend(): Backend {
   const { config, missing } = readFirebaseConfig()
@@ -95,6 +114,8 @@ export function createFirebaseBackend(): Backend {
   const storage = getStorage(app)
   // Esta pestaña está cerrando la sesión (no se recarga al verla cerrada: borra antes la caché).
   let signingOut = false
+  // Al abrir la app, sin sesión y antes de usar Firestore, se termina de borrar lo que quedó al cerrarla.
+  if (isClearPending()) clearIndexedDbPersistence(db).then(() => setClearPending(false), () => undefined)
 
   const userCol = (uid: string, name: 'notes' | 'folders') => collection(db, 'users', uid, name)
 
@@ -138,14 +159,16 @@ export function createFirebaseBackend(): Backend {
       // Que no queden notas en este dispositivo. Las demás pestañas se recargan al ver la sesión cerrada
       // y dejan libre la caché: se reintenta mientras tanto.
       await terminate(db).catch(() => undefined)
-      for (let attempt = 0; attempt < CLEAR_ATTEMPTS; attempt++) {
+      let cleared = false
+      for (let attempt = 0; attempt < CLEAR_ATTEMPTS && !cleared; attempt++) {
         try {
           await clearIndexedDbPersistence(db)
-          break
+          cleared = true
         } catch {
           await new Promise((resolve) => setTimeout(resolve, CLEAR_RETRY_MS))
         }
       }
+      setClearPending(!cleared)
       window.location.reload()
     },
 

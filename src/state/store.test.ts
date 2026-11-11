@@ -667,3 +667,14 @@ describe('signing out', () => {
     expect(await hasUnsyncedChanges()).toBe(true)
   })
 })
+
+describe('signing out with text rejected in another tab', () => {
+  it('counts rejected text another tab of this device kept, not only this tab', async () => {
+    localStorage.setItem(
+      'kaze:rejected:u1:n9',
+      JSON.stringify({ content: doc(text('de otra pestaña')), reason: 'denied', page: 'other-tab', seq: 1 }),
+    )
+    expect(useApp.getState().sync.rejected).toEqual({})
+    expect(await hasUnsyncedChanges()).toBe(true)
+  })
+})

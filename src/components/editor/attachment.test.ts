@@ -7,6 +7,7 @@ import {
   canOpenUrl,
   deleteAttachment,
   linkTarget,
+  nextRetryDelay,
   fileIcon,
   formatSize,
   insertFiles,
@@ -250,6 +251,10 @@ describe('attachment chip helpers', () => {
     for (const unsafe of ['javascript:alert(1)', 'data:text/html,x', 'notas', '/ruta/relativa', '']) {
       expect(linkTarget(unsafe)).toBeNull()
     }
+  })
+
+  it('waits longer after each upload failure in a row, up to 15 minutes', () => {
+    expect([1, 2, 3, 4, 5, 6, 10].map((failures) => nextRetryDelay(failures) / 1000)).toEqual([30, 60, 120, 240, 480, 900, 900])
   })
 
   it('maps file types to icons and formats sizes', () => {

@@ -11,6 +11,9 @@ const FILES_CACHE = 'kaze-files'
 // Las descargas de <img> son opacas y el navegador cuenta cada una como varios MB de cuota,
 // compartida con las notas guardadas sin conexión: se guardan solo las últimas.
 const MAX_FILES = 100
+// Por encima de esta parte de la cuota no se guardan más ficheros: el espacio queda para las notas y los adjuntos
+// que aún esperan subirse.
+const MAX_QUOTA_SHARE = 0.5
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -70,7 +73,17 @@ async function storageFile(event) {
   return response
 }
 
+async function hasRoom() {
+  try {
+    const { usage, quota } = await self.navigator.storage.estimate()
+    return !quota || usage / quota < MAX_QUOTA_SHARE
+  } catch {
+    return true
+  }
+}
+
 async function keepFile(cache, request, response) {
+  if (!(await hasRoom())) return
   await cache.put(request, response)
   // Las claves salen en orden de inserción: se borran las más antiguas.
   const keys = await cache.keys()

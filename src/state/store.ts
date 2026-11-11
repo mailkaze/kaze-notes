@@ -533,8 +533,9 @@ export async function hasUnsyncedChanges(): Promise<boolean> {
   if (!user || !backend) return false
   const synced = await backend.waitForSync(SIGN_OUT_WAIT_MS)
   const queued = await pendingUploadCount(user.uid).catch(() => 0)
-  const { sync } = get()
-  return !synced || queued > 0 || Object.keys(sync.rejected).length > 0 || sync.dirty.some((key) => key.startsWith(UPLOAD_KEY))
+  // Lo rechazado se lee del dispositivo: puede haberlo guardado otra pestaña.
+  const rejected = Object.keys(storedRejected(user.uid)).length
+  return !synced || queued > 0 || rejected > 0 || get().sync.dirty.some((key) => key.startsWith(UPLOAD_KEY))
 }
 
 /** Cierra la sesión y borra de este dispositivo los datos de la cuenta; las preferencias de la interfaz se quedan. */
