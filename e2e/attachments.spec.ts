@@ -220,6 +220,30 @@ test('the toolbar opens web and mail links but not script links', async ({ page 
   expect(await opened()).toEqual(['https://example.com/', 'mailto:ana@example.com'])
 })
 
+test('web addresses written without https open as https, with the toolbar and with Cmd/Ctrl+click; app paths keep opening', async ({
+  page,
+}) => {
+  const link = (text: string, href: string) => ({ type: 'text', text, marks: [{ type: 'link', attrs: { href } }] })
+  const content = {
+    type: 'doc',
+    content: [
+      { type: 'paragraph', content: [link('dominio', 'example.com/ruta')] },
+      { type: 'paragraph', content: [link('relativo', '/ayuda')] },
+    ],
+  }
+  await seed(page, { notes: [{ id: 'bare', title: 'Sin esquema', content: JSON.stringify(content) }] })
+  await page.getByTestId('tree-note').filter({ hasText: 'Sin esquema' }).click()
+  const opened = await recordOpens(page)
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
+
+  await page.locator('.ProseMirror a', { hasText: 'dominio' }).click()
+  await page.getByRole('button', { name: 'Abrir enlace' }).click()
+  await page.locator('.ProseMirror a', { hasText: 'dominio' }).click({ modifiers: [mod] })
+  await page.locator('.ProseMirror a', { hasText: 'relativo' }).click({ modifiers: [mod] })
+  const origin = new URL(page.url()).origin
+  expect(await opened()).toEqual(['https://example.com/ruta', 'https://example.com/ruta', `${origin}/ayuda`])
+})
+
 test('two folders moved into each other from two devices stay in the sidebar, at the top level', async ({ page }) => {
   await seed(page, {
     folders: [

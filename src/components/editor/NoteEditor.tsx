@@ -193,8 +193,10 @@ function EditorScreen({ noteId }: { noteId: string }) {
           const link = (event.target as Element | null)?.closest?.('a[href]')
           if (!(link instanceof HTMLAnchorElement)) return false
           event.preventDefault()
-          // El atributo tal cual: `link.href` resolvería "example.com" como una ruta de esta app.
-          const target = linkTarget(link.getAttribute('href') ?? '')
+          // El atributo tal cual: `link.href` resolvería "example.com" como una ruta de esta app. Una ruta relativa
+          // ("/ruta", "#ancla") sí se abre en esta app, como antes.
+          const raw = link.getAttribute('href') ?? ''
+          const target = linkTarget(raw) ?? (/^[/.?#]/.test(raw) ? linkTarget(link.href) : null)
           if (target) window.open(target, '_blank', 'noopener,noreferrer')
           return true
         },
