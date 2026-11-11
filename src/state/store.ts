@@ -238,17 +238,23 @@ function commit(allOps: WriteOp[]) {
   const send = ops.map((op) => toSend(op, user.email ?? ''))
   applyLocal(ops)
   const seq = ++writeSeq
-  backend.write(user.uid, send).then(
-    () => {
-      clearTransientError()
-      settleRejected(user.uid, ops, seq, null)
-    },
-    (error: unknown) => {
-      const reason = error instanceof Error ? error.message : String(error)
-      setSync({ error: reason })
-      settleRejected(user.uid, ops, seq, reason)
-    },
-  )
+  // Lo de las notas compartidas conmigo se envía aparte: si la nube lo rechaza (p. ej. ya no está compartida), lo
+  // mío no se da por rechazado.
+  for (const shared of [false, true]) {
+    const group = ops.filter((_, i) => (send[i].type === 'setSharedNote') === shared)
+    if (group.length === 0) continue
+    backend.write(user.uid, send.filter((op) => (op.type === 'setSharedNote') === shared)).then(
+      () => {
+        clearTransientError()
+        settleRejected(user.uid, group, seq, null, shared)
+      },
+      (error: unknown) => {
+        const reason = error instanceof Error ? error.message : String(error)
+        setSync({ error: reason })
+        settleRejected(user.uid, group, seq, reason, shared)
+      },
+    )
+  }
 }
 
 // ---------- Texto rechazado por la nube ----------
@@ -265,6 +271,8 @@ export interface RejectedVersion {
   /** Carga de la página y número de la escritura rechazada: solo la deja sin efecto un guardado posterior. */
   page: string
   seq: number
+  /** Era de una nota compartida conmigo. */
+  shared?: boolean
 }
 
 let writeSeq = 0
@@ -326,14 +334,14 @@ function textOf(op: WriteOp): Pick<RejectedVersion, 'title' | 'content'> | null 
 }
 
 /** Tras una escritura: conserva el texto rechazado o, si salió bien, olvida lo rechazado antes. */
-function settleRejected(uid: string, ops: WriteOp[], seq: number, reason: string | null) {
+function settleRejected(uid: string, ops: WriteOp[], seq: number, reason: string | null, shared = false) {
   // Un rechazo que llega mientras se cierra la sesión no vuelve a dejar en el dispositivo lo que se está borrando.
   if (signingOut || get().user?.uid !== uid) return
   for (const op of ops) {
     const text = textOf(op)
     if (!text) continue
     const old = readRejected(uid, op.id)
-    if (reason !== null) writeRejected(uid, op.id, { ...old, ...text, reason, page: deviceId, seq })
+    if (reason !== null) writeRejected(uid, op.id, { ...old, ...text, reason, page: deviceId, seq, ...(shared && { shared }) })
     // Un guardado anterior al rechazado puede confirmarse después: ese no lo deja sin efecto.
     else if (old && (old.page !== deviceId || old.seq < seq)) writeRejected(uid, op.id, null)
   }
@@ -432,16 +440,55 @@ let unsubscribeShared: (() => void) | null = null
 let resubscribeSharedTimer: ReturnType<typeof setTimeout> | undefined
 let initialized = false
 
-// Últimas listas recibidas: mis notas y las de otros compartidas conmigo (se muestran juntas).
-let ownNotes: Note[] = []
-let sharedNotes: Note[] = []
-
-function refreshNotes() {
+/**
+ * Mis notas y las compartidas conmigo llegan por escuchas distintas y se muestran juntas: cada una sustituye solo
+ * las suyas, sin tocar (ni deshacer cambios recién hechos en) las de la otra. Con el mismo id, gana la mía.
+ */
+function receiveNotes(list: Note[], shared: boolean) {
   const prev = get().notes
-  const mine = new Set(ownNotes.map((n) => n.id))
-  const list = [...ownNotes, ...sharedNotes.filter((n) => !mine.has(n.id))]
-  set((s) => ({ notes: mergeRecord(s.notes, list, sameNote) }))
+  const others = Object.values(prev).filter((n) => Boolean(n.ownerUid) !== shared)
+  const ids = new Set((shared ? others : list).map((n) => n.id))
+  const next = shared ? [...others, ...list.filter((n) => !ids.has(n.id))] : [...list, ...others.filter((n) => !ids.has(n.id))]
+  set((s) => ({ notes: mergeRecord(s.notes, next, sameNote) }))
   keepOverwritten(prev, list)
+}
+
+/**
+ * Texto que la nube rechazó de una nota compartida conmigo que ya no veo (dejaron de compartirla mientras se
+ * enviaba): se guarda como nota nueva mía, para no perderlo, y deja de quedar pendiente.
+ */
+function keepUnsharedRejected() {
+  const { user, notes, sync } = get()
+  if (!user || !backend) return
+  for (const id of Object.keys(sync.rejected)) {
+    const version = notes[id] ? null : readRejected(user.uid, id)
+    if (!version?.shared) continue
+    const title = version.title?.trim() ?? ''
+    const content = version.content ?? ''
+    const first = activeNotes(get().notes)[0]
+    const now = Date.now()
+    commit([
+      {
+        type: 'setNote',
+        id: backend.newId(),
+        data: {
+          title: title ? t(`${title} (conflict)`, `${title} (conflicto)`) : t('(conflict)', '(conflicto)'),
+          content,
+          preview: previewFromDoc(parseContent(content)),
+          folderId: null,
+          order: keyBetween(null, first?.order),
+          pinned: false,
+          locked: false,
+          color: null,
+          trashed: false,
+          trashedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+    ])
+    writeRejected(user.uid, id, null)
+  }
 }
 
 const sameInvites = (a: Invite[], b: Invite[]) => JSON.stringify(a) === JSON.stringify(b)
@@ -492,8 +539,6 @@ export function initApp() {
     unsubscribeShared = null
     clearTimeout(resubscribeSharedTimer)
     resubscribeSharedTimer = undefined
-    ownNotes = []
-    sharedNotes = []
     // Los errores eran de la sesión anterior o del inicio de sesión que ahora sí ha funcionado.
     set((s) => ({
       user,
@@ -514,6 +559,7 @@ export function initApp() {
     let notesMeta: SnapshotMeta | null = null
     let foldersMeta: SnapshotMeta | null = null
     let sharedMeta: SnapshotMeta | null = null
+    const email = user.email
     const updateMeta = () => {
       setSync({
         serverPending: Boolean(notesMeta?.pendingWrites || foldersMeta?.pendingWrites || sharedMeta?.pendingWrites),
@@ -523,6 +569,8 @@ export function initApp() {
         set({ dataReady: true })
         resumeQueuedUploads()
       }
+      // Solo con las dos listas confirmadas por la nube se sabe que una nota compartida ya no está.
+      if (email && notesMeta && !notesMeta.fromCache && sharedMeta && !sharedMeta.fromCache) keepUnsharedRejected()
     }
     const received = () => {
       if (get().sync.listenerError) setLasting({ listenerError: null })
@@ -532,8 +580,7 @@ export function initApp() {
         notes: (list, meta) => {
           notesMeta = meta
           received()
-          ownNotes = list
-          refreshNotes()
+          receiveNotes(list, false)
           updateMeta()
         },
         folders: (list, meta) => {
@@ -558,15 +605,16 @@ export function initApp() {
 
     // Notas compartidas conmigo e invitaciones: con su propia escucha, para que un fallo aquí (p. ej. un índice que
     // aún se está creando) no corte la de mis datos.
-    const email = user.email
     const subscribeShared = () => {
       if (!email) return
       unsubscribeShared = api.subscribeShared(user.uid, email, {
         notes: (list, meta) => {
           sharedMeta = meta
           // La que su dueño manda a la papelera deja de verse.
-          sharedNotes = list.filter((n) => !n.trashed)
-          refreshNotes()
+          receiveNotes(
+            list.filter((n) => !n.trashed),
+            true,
+          )
           updateMeta()
         },
         invites: (list) => {
@@ -1098,9 +1146,12 @@ export function deleteFolder(id: string) {
 
 // ---------- Compartir ----------
 
-/** Envía un cambio de compartir; si la nube lo rechaza, se muestra el error. */
-function sendShare(change: Promise<void>) {
-  change.then(clearTransientError, (error: unknown) => setSync({ error: error instanceof Error ? error.message : String(error) }))
+/** Envía un cambio de compartir; si la nube lo rechaza, se muestra el error y se deshace lo hecho en local (`undo`). */
+function sendShare(change: Promise<void>, undo?: () => void) {
+  change.then(clearTransientError, (error: unknown) => {
+    setSync({ error: error instanceof Error ? error.message : String(error) })
+    undo?.()
+  })
 }
 
 /** Invita a `rawEmail` a una nota mía. Devuelve el motivo si no se puede, o null si se ha enviado. */
@@ -1133,13 +1184,19 @@ export function leaveSharedNote(id: string) {
   if (!user?.email || !backend || !owner) return
   // Lo pendiente del editor se envía antes de salir de la nota.
   leaveIfViewing(id)
+  // Deja de verse al momento; si la nube lo rechaza, vuelve con su escucha (la caché deshace el cambio).
   sendShare(backend.removeShare(owner, id, user.email))
-  sharedNotes = sharedNotes.filter((n) => n.id !== id)
-  refreshNotes()
+  set((s) => {
+    const { [id]: _, ...notes } = s.notes
+    return { notes }
+  })
 }
 
-const dropInvite = (invite: Invite) =>
-  set((s) => ({ invites: s.invites.filter((i) => i.noteId !== invite.noteId || i.ownerUid !== invite.ownerUid) }))
+const sameInvite = (a: Invite, b: Invite) => a.noteId === b.noteId && a.ownerUid === b.ownerUid
+const dropInvite = (invite: Invite) => set((s) => ({ invites: s.invites.filter((i) => !sameInvite(i, invite)) }))
+// Si la nube rechaza aceptarla o rechazarla, la invitación vuelve para poder intentarlo de nuevo.
+const restoreInvite = (invite: Invite) =>
+  set((s) => (s.invites.some((i) => sameInvite(i, invite)) ? s : { invites: [...s.invites, invite] }))
 
 /** Acepta una invitación: la nota aparece la primera en "Todas las notas", sin carpeta, sin fijar y sin proteger. */
 export function acceptInvite(invite: Invite) {
@@ -1147,13 +1204,13 @@ export function acceptInvite(invite: Invite) {
   if (!user?.email || !backend) return
   const first = activeNotes(get().notes)[0]
   const prefs = { folderId: null, order: keyBetween(null, first?.order), pinned: false, locked: false }
-  sendShare(backend.acceptShare(invite.ownerUid, invite.noteId, user.email, prefs))
+  sendShare(backend.acceptShare(invite.ownerUid, invite.noteId, user.email, prefs), () => restoreInvite(invite))
   dropInvite(invite)
 }
 
 export function rejectInvite(invite: Invite) {
   const { user } = get()
   if (!user?.email || !backend) return
-  sendShare(backend.removeShare(invite.ownerUid, invite.noteId, user.email))
+  sendShare(backend.removeShare(invite.ownerUid, invite.noteId, user.email), () => restoreInvite(invite))
   dropInvite(invite)
 }

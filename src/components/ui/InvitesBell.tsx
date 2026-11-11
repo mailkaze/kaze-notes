@@ -9,10 +9,10 @@ import { Popover } from './Popover'
 export function InvitesBell() {
   const invites = useApp((s) => s.invites)
   // Sin invitaciones se desmonta: la siguiente que llegue no aparece con el panel ya abierto.
-  return invites.length > 0 ? <InvitesPanel invites={invites} /> : null
+  return invites.length > 0 ? <InvitesButton invites={invites} /> : null
 }
 
-function InvitesPanel({ invites }: { invites: Invite[] }) {
+function InvitesButton({ invites }: { invites: Invite[] }) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   const close = useCallback(() => setOpen(false), [])

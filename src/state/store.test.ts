@@ -768,10 +768,10 @@ describe('notes shared with me', () => {
     deleteNoteForever('s1')
     deleteFolder('f')
     await settle()
-    expect(writtenOps()).toEqual([
-      { type: 'setNote', id: 'mine', data: expect.objectContaining({ trashed: true }) },
-      { type: 'setSharedNote', owner: 'u2', id: 's1', data: { prefs: { 'ana@example.com': { folderId: null } } } },
-      { type: 'deleteFolder', id: 'f' },
+    // Lo mío y lo de la nota compartida se envían por separado: si se rechaza esto último, lo mío no cuenta como rechazado.
+    expect(fake.backend.write.mock.calls.map(([, ops]) => ops)).toEqual([
+      [{ type: 'setNote', id: 'mine', data: expect.objectContaining({ trashed: true }) }, { type: 'deleteFolder', id: 'f' }],
+      [{ type: 'setSharedNote', owner: 'u2', id: 's1', data: { prefs: { 'ana@example.com': { folderId: null } } } }],
     ])
     expect(fake.backend.deleteNoteFiles).not.toHaveBeenCalled()
     expect(useApp.getState().notes.s1).toMatchObject({ trashed: false, folderId: null })
@@ -801,6 +801,32 @@ describe('notes shared with me', () => {
     expect(fake.backend.removeShare).toHaveBeenCalledWith('u2', 's1', 'ana@example.com')
     expect(useApp.getState().view.kind).toBe('notes')
     expect(useApp.getState().notes.s1).toBeUndefined()
+  })
+
+  it("a shared snapshot never brings back an older version of my own notes (no spurious conflict copy)", async () => {
+    lastHandlers().notes([note('a', { device: 'other', rev: 1, baseRev: 0 })], meta)
+    updateNote('a', { title: 'mine' })
+    sharedHandlers().notes([shared('s1')], meta)
+    await settle()
+    expect(useApp.getState().notes.a).toMatchObject({ title: 'mine', rev: 2 })
+    expect(writtenOps().map((op) => op.id)).toEqual(['a'])
+  })
+
+  it('keeps text the cloud refused for a note that is no longer shared with me as a new note of mine', async () => {
+    sharedHandlers().notes([shared('s1', { title: 'Plan' })], meta)
+    fake.backend.write.mockRejectedValueOnce(new Error('permission-denied'))
+    updateNote('s1', { title: 'Plan', content: doc(text('my late edit')) })
+    await settle()
+    expect(useApp.getState().sync.rejected).toHaveProperty('s1')
+    lastHandlers().notes([], meta)
+    lastHandlers().folders([], meta)
+    sharedHandlers().notes([], meta)
+    await settle()
+    const copies = Object.values(useApp.getState().notes)
+    expect(copies).toEqual([expect.objectContaining({ title: 'Plan (conflict)', content: doc(text('my late edit')), folderId: null })])
+    expect(copies[0].ownerUid).toBeUndefined()
+    expect(useApp.getState().sync.rejected).toEqual({})
+    expect(rejectedVersion('s1')).toBeNull()
   })
 
   it('a failing shared listener shows an error and only that listener subscribes again after 10 s', async () => {
@@ -862,6 +888,20 @@ describe('invitations', () => {
     expect(prefs).toEqual({ folderId: null, order: expect.any(String), pinned: false, locked: false })
     expect((prefs as { order: string }).order < 'a5').toBe(true)
     expect(useApp.getState().invites).toEqual([])
+  })
+
+  it('brings the invitation back if the cloud refuses accepting or rejecting it', async () => {
+    sharedHandlers().invites([invite])
+    fake.backend.acceptShare.mockRejectedValueOnce(new Error('unavailable'))
+    acceptInvite(invite)
+    expect(useApp.getState().invites).toEqual([])
+    await settle()
+    expect(useApp.getState().invites).toEqual([invite])
+    expect(useApp.getState().sync.error).toBe('unavailable')
+    fake.backend.removeShare.mockRejectedValueOnce(new Error('unavailable'))
+    rejectInvite(invite)
+    await settle()
+    expect(useApp.getState().invites).toEqual([invite])
   })
 
   it('rejecting removes me from the note and clears the invitation', () => {

@@ -98,16 +98,15 @@ Editing at the same time works like editing on two devices: changes arrive live 
 
 Known limits:
 - A pending invitee can already read the note before accepting (the owner chose to send it to them), and everyone in it can see the other people's emails and personal settings (folder ids, order, pin, lock).
-- The inviter's email shown in the invitation is written by the owner's app; the rules do not check it.
-- Attachments added by an invited person are stored in their own Storage. Removing them from the note, or deleting the note, does not delete those files; they stay in the uploader's account.
-- If you are removed from a note while you have unsent offline edits to it, the cloud rejects them; the text is kept on your device as with any rejected change.
+- Attachments added by an invited person are stored in their own Storage. If someone else removes them from the note, or the owner deletes the note, those files stay in the uploader's account. If the uploader removes one, it is deleted, even when the owner had copied it into another note.
+- If you are removed from a note while you have unsent offline edits to it, the cloud rejects them; that text is saved as a new "(conflict)" note of yours.
 - Emails are compared exactly (lowercase); Google account emails are lowercase.
 
 ## Data model
 
 - `users/{uid}/folders/{id}` — `name`, `parentId`, `order`
 - `users/{uid}/notes/{id}` — `title`, `content` (TipTap JSON string), `preview`, `folderId`, `order`, `pinned`, `locked`, `color`, `trashed`, `trashedAt`, plus `rev`/`baseRev`/`device` stamped on each title/content save (a save based on an older `rev` than the one a device holds keeps that device's version as a "(conflict)" copy; notes from older app versions have none)
-- Shared notes add `ownerEmail`, `invited` and `members` (lists of emails) and `prefs.<email>` with each invited person's `folderId`, `order`, `pinned` and `locked`. Invited people find them with collection-group queries on `members` / `invited` (indexes in `firestore.indexes.json`)
+- Shared notes add `ownerEmail` (the rules only accept the owner's own email), `invited` and `members` (lists of emails) and `prefs.<email>` with each invited person's `folderId`, `order`, `pinned` and `locked`. Invited people find them with collection-group queries on `members` / `invited` (indexes in `firestore.indexes.json`)
 - Storage: `users/{uid}/notes/{noteId}/{timestamp}-{random}-{file}`
 
 `order` fields are fractional-index keys, so reordering only rewrites the moved item.

@@ -6,10 +6,20 @@ import { leaveSharedNote, shareNote, stopSharing, useApp } from '../../state/sto
 import { confirmDialog } from '../ui/confirm'
 import { Popover } from '../ui/Popover'
 
-/** Personas con las que está compartida (aceptadas y pendientes). */
-function peopleOf(note: Note): string[] {
-  return [...(note.members ?? []), ...(note.invited ?? [])]
+/**
+ * Personas que se muestran: al dueño, quienes ha invitado (aceptados y pendientes); al invitado, el dueño y el resto
+ * de miembros. Sin repetidos.
+ */
+function peopleOf(note: Note, me: string): string[] {
+  const list = note.ownerUid
+    ? [note.ownerEmail ?? '', ...(note.members ?? []).filter((e) => e !== me)]
+    : [...(note.members ?? []), ...(note.invited ?? [])]
+  return [...new Set(list.filter(Boolean))]
 }
+
+const sharedByLabel = (note: Note) =>
+  t(`Shared with you by ${note.ownerEmail ?? ''}`, `Compartida contigo por ${note.ownerEmail ?? ''}`)
+const stopLabel = (person: string) => t(`Stop sharing with ${person}`, `Dejar de compartir con ${person}`)
 
 async function confirmStop(note: Note, email: string) {
   const ok = await confirmDialog({
@@ -45,16 +55,13 @@ function SharePanel({ note, onClose }: { note: Note; onClose: () => void }) {
     if (!problem) setEmail('')
   }
 
-  // El invitado ve al dueño y al resto de personas; el dueño, a quienes ha invitado (y si aún no han aceptado).
-  const rows = invitee
-    ? [note.ownerEmail ?? '', ...(note.members ?? []).filter((e) => e !== me)].filter(Boolean)
-    : peopleOf(note)
+  const rows = peopleOf(note, me)
 
   return (
     <div className="share-panel">
       <p className="share-title">
         {invitee
-          ? t(`Shared with you by ${note.ownerEmail ?? ''}`, `Compartida contigo por ${note.ownerEmail ?? ''}`)
+          ? sharedByLabel(note)
           : rows.length > 0
             ? t('Shared with', 'Compartida con')
             : t('Share note', 'Compartir nota')}
@@ -75,8 +82,8 @@ function SharePanel({ note, onClose }: { note: Note; onClose: () => void }) {
                   <button
                     type="button"
                     className="icon-btn share-remove"
-                    aria-label={t(`Stop sharing with ${person}`, `Dejar de compartir con ${person}`)}
-                    title={t(`Stop sharing with ${person}`, `Dejar de compartir con ${person}`)}
+                    aria-label={stopLabel(person)}
+                    title={stopLabel(person)}
                     onClick={() => {
                       onClose()
                       void confirmStop(note, person)
@@ -137,13 +144,15 @@ function SharePanel({ note, onClose }: { note: Note; onClose: () => void }) {
 
 /** Botón de compartir: muestra si la nota está compartida y con quién, y abre el panel para gestionarlo. */
 export function ShareButton({ note }: { note: Note }) {
+  const me = useApp((s) => s.user?.email ?? '')
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   const close = useCallback(() => setOpen(false), [])
-  const people = peopleOf(note)
+  // El número coincide con las personas que lista el panel.
+  const people = peopleOf(note, me)
   const shared = Boolean(note.ownerUid) || people.length > 0
   const label = note.ownerUid
-    ? t(`Shared with you by ${note.ownerEmail ?? ''}`, `Compartida contigo por ${note.ownerEmail ?? ''}`)
+    ? sharedByLabel(note)
     : shared
       ? t(`Shared with ${people.join(', ')}`, `Compartida con ${people.join(', ')}`)
       : t('Share', 'Compartir')

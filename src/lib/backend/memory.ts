@@ -54,6 +54,9 @@ function persist(db: Db) {
 
 const demoUser: AppUser = { uid: DEMO_UID, name: 'Demo', email: DEMO_EMAIL, photoURL: null }
 
+/** Correo de cada cuenta en este backend (con él se comprueba quién es miembro de una nota compartida). */
+const emailOf = (uid: string) => (uid === DEMO_UID ? DEMO_EMAIL : `${uid}@local.test`)
+
 /** Cuenta con la que entra esta pestaña: la de `?as=nombre` (recordada en la pestaña) o la de demostración. */
 function tabUser(): AppUser {
   let name: string | null = null
@@ -64,11 +67,10 @@ function tabUser(): AppUser {
   } catch {
     // Sin almacenamiento de sesión: cuenta de demostración.
   }
-  return name ? { uid: name, name, email: `${name}@local.test`, photoURL: null } : demoUser
+  return name ? { uid: name, name, email: emailOf(name), photoURL: null } : demoUser
 }
 
 const ownerOf = (item: { owner?: string }) => item.owner ?? DEMO_UID
-const emailOf = (uid: string) => (uid === DEMO_UID ? DEMO_EMAIL : `${uid}@local.test`)
 
 /** La nota tal y como la ve su dueño (sin los datos internos del almacén). */
 function plainNote(stored: StoredNote): Note {
@@ -119,8 +121,22 @@ export function createMemoryBackend(): Backend {
     })
   }
 
-  /** Aplica un cambio, lo guarda y lo "confirma" tras la latencia simulada. */
+  /**
+   * Aplica un cambio al momento (de forma síncrona: `write` depende de ello), lo guarda y lo "confirma" tras la
+   * latencia simulada. Parte de lo último guardado, por si otra pestaña escribió y aún no ha llegado su aviso.
+   */
   const change = (apply: () => void): Promise<void> => {
+    const latest = (() => {
+      try {
+        return parse(localStorage.getItem(STORAGE_KEY))
+      } catch {
+        return null
+      }
+    })()
+    if (latest) {
+      db.notes = latest.notes ?? {}
+      db.folders = latest.folders ?? {}
+    }
     apply()
     persist(db)
     inFlight += 1

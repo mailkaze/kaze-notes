@@ -120,6 +120,16 @@ describe('memory backend sharing between two accounts', () => {
     expect(ana.folders.map((f) => f.name)).toEqual(['Home'])
   })
 
+  it('a tab that has not heard of the latest change from another tab still keeps it when it writes', async () => {
+    const tabA = createMemoryBackend()
+    const tabB = createMemoryBackend()
+    void tabA.write('local', [{ type: 'setNote', id: 'n1', data: fullNote('From A') }])
+    // jsdom no avisa a la otra "pestaña" (evento storage): B escribe sin haber recibido el cambio de A.
+    void tabB.write('local', [{ type: 'setNote', id: 'n2', data: fullNote('From B') }])
+    const stored = JSON.parse(localStorage.getItem('kaze:memory-db') ?? '{}')
+    expect(Object.keys(stored.notes).sort()).toEqual(['n1', 'n2'])
+  })
+
   it('signs in as another account with ?as=name and keeps it on reload of the same tab', async () => {
     window.history.replaceState({}, '', '/?as=bob')
     const users: (AppUser | null)[] = []
