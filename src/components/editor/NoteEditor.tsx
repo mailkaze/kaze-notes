@@ -7,9 +7,11 @@ import { noteBg } from '../../lib/colors'
 import { t } from '../../lib/i18n'
 import {
   createConflictCopy,
+  discardRejected,
   markClean,
   markDirty,
   registerFlush,
+  rejectedVersion,
   setFullscreen,
   updateNote,
   useApp,
@@ -58,8 +60,15 @@ export function NoteEditor({ noteId }: { noteId: string }) {
 function EditorScreen({ noteId }: { noteId: string }) {
   const note = useApp((s) => s.notes[noteId])
   const tooLarge = useApp((s) => s.sync.tooLarge.includes(noteId))
+  // Cambia con cada escritura rechazada de esta nota.
+  const rejected = useApp((s) => s.sync.rejected[noteId])
   const [initial] = useState(() => useApp.getState().notes[noteId])
-  const [title, setTitle] = useState(initial.title)
+  // Lo que se ve al abrir: el texto que la nube rechazó, si se conserva aquí (el editor nace con él).
+  const [shown] = useState(() => {
+    const version = rejectedVersion(noteId)
+    return { title: version?.title ?? initial.title, content: version?.content ?? initial.content }
+  })
+  const [title, setTitle] = useState(shown.title)
   const [emoji] = useState(() => new EmojiMenuController())
   const titleRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -67,10 +76,12 @@ function EditorScreen({ noteId }: { noteId: string }) {
   // ---------- Guardado con debounce ----------
   const dirtyKey = `note:${noteId}`
   const saved = useRef({ title: initial.title, content: initial.content })
-  const pending = useRef({ dirty: false, timer: 0, since: 0, title: initial.title })
+  const pending = useRef({ dirty: false, timer: 0, since: 0, title: shown.title })
   const latest = useRef<EditorState | null>(null)
   // Fuerza a aplicar lo llegado de otro dispositivo que no chocó con los cambios locales sin guardar.
   const [resync, setResync] = useState(0)
+  // Tras un rechazo de la nube, el siguiente guardado parte de la versión de la nube (no es un conflicto).
+  const rebase = useRef(false)
 
   const flush = useCallback(() => {
     const p = pending.current
@@ -83,9 +94,11 @@ function EditorScreen({ noteId }: { noteId: string }) {
     if (state) {
       const json = state.doc.toJSON()
       const local = { title: p.title, content: JSON.stringify(json) }
-      const base = saved.current
       // Versión de otro dispositivo que no se aplicó al editor porque había cambios sin guardar.
-      const remote = useApp.getState().notes[noteId] ?? base
+      const remote = useApp.getState().notes[noteId] ?? saved.current
+      // Tras un rechazo se reenvía todo lo que difiere de la nube.
+      const base = rebase.current ? remote : saved.current
+      rebase.current = false
       const here = { title: local.title !== base.title, content: local.content !== base.content }
       const there = { title: remote.title !== base.title, content: remote.content !== base.content }
       // Solo es conflicto un campo cambiado en los dos lados con valores distintos.
@@ -138,8 +151,8 @@ function EditorScreen({ noteId }: { noteId: string }) {
   // destruyendo las vistas de los nodos) cada vez que recibe objetos distintos en un render.
   const [options] = useState<UseEditorOptions>(() => ({
     extensions: createExtensions({ emoji, reorderableTasks: true }),
-    content: parseContent(initial.content) ?? '',
-    autofocus: !initial.title && !hasContent(parseContent(initial.content)) ? 'start' : false,
+    content: parseContent(shown.content) ?? '',
+    autofocus: !shown.title && !hasContent(parseContent(shown.content)) ? 'start' : false,
     editorProps: {
       attributes: { class: 'note-body', spellcheck: 'true', 'aria-label': t('Note text', 'Texto de la nota') },
       handleDrop: (view, event, _slice, moved) => {
@@ -215,6 +228,40 @@ function EditorScreen({ noteId }: { noteId: string }) {
     setTitle(remoteTitle)
   }, [remoteTitle, resync])
 
+  // ---------- Texto que la nube rechazó ----------
+  // Vuelve al editor (también al abrir la nota más tarde) y queda pendiente: la siguiente edición lo reenvía.
+  useEffect(() => {
+    const version = rejected === undefined ? null : rejectedVersion(noteId)
+    if (!version) return
+    const p = pending.current
+    // Con cambios sin guardar, el editor ya tiene lo último escrito.
+    if (!p.dirty) {
+      if (version.content !== undefined) applyRemoteContent(editor, version.content)
+      if (version.title !== undefined) {
+        p.title = version.title
+        setTitle(version.title)
+      }
+    }
+    rebase.current = true
+    p.dirty = true
+    markDirty(dirtyKey)
+  }, [editor, rejected, noteId, dirtyKey])
+
+  const discardRejectedText = () => {
+    discardRejected(noteId)
+    const p = pending.current
+    window.clearTimeout(p.timer)
+    Object.assign(p, { dirty: false, timer: 0, since: 0 })
+    rebase.current = false
+    markClean(dirtyKey)
+    const current = useApp.getState().notes[noteId]
+    if (!current) return
+    saved.current = { title: current.title, content: current.content }
+    p.title = current.title
+    setTitle(current.title)
+    applyRemoteContent(editor, current.content)
+  }
+
   // Soltar ficheros fuera del editor nunca debe hacer que el navegador abra el fichero.
   useEffect(() => {
     const block = (e: DragEvent) => {
@@ -267,6 +314,19 @@ function EditorScreen({ noteId }: { noteId: string }) {
             'This note is too large to save (max 1 MB). Your latest changes are not saved: delete something or move part of it to another note.',
             'Esta nota es demasiado grande para guardarse (máx. 1 MB). Los últimos cambios no se han guardado: borra algo o pasa una parte a otra nota.',
           )}
+        </p>
+      )}
+      {rejected !== undefined && (
+        <p className="note-too-large" role="alert">
+          {t('The cloud did not accept the latest changes of this note', 'La nube no ha aceptado los últimos cambios de esta nota')}
+          {` (${rejectedVersion(noteId)?.reason ?? ''}). `}
+          {t(
+            'They are kept on this device and sent again with your next edit.',
+            'Se conservan en este dispositivo y se vuelven a enviar con tu próxima edición.',
+          )}{' '}
+          <button type="button" className="note-notice-action" onClick={discardRejectedText}>
+            {t('Discard', 'Descartar')}
+          </button>
         </p>
       )}
       <div className="note-scroll">

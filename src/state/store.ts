@@ -24,6 +24,8 @@ export interface SyncState {
   listenerError: string | null
   /** Notas que no se han guardado por superar el tamaño máximo (persiste hasta que quepan). */
   tooLarge: string[]
+  /** Notas con texto que la nube rechazó, guardado en el dispositivo (id → número de la escritura rechazada). */
+  rejected: Record<string, number>
 }
 
 export interface AppState {
@@ -101,6 +103,7 @@ export const useApp = create<AppState>(() => ({
     error: null,
     listenerError: null,
     tooLarge: [],
+    rejected: {},
   },
 }))
 
@@ -114,11 +117,19 @@ function setSync(patch: Partial<SyncState>) {
 const tooLargeMessage = () =>
   t('This note is too large to save (max 1 MB)', 'La nota es demasiado grande para guardarse (máx. 1 MB)')
 
-type LastingErrors = Pick<SyncState, 'listenerError' | 'tooLarge'>
+const rejectedMessage = () =>
+  t(
+    'The cloud did not accept some changes; they are kept on this device',
+    'La nube no ha aceptado algunos cambios; se conservan en este dispositivo',
+  )
+
+type LastingErrors = Pick<SyncState, 'listenerError' | 'tooLarge' | 'rejected'>
 
 /** Error que sigue visible aunque otras escrituras salgan bien. */
 function lastingError(sync: LastingErrors): string | null {
-  return sync.listenerError ?? (sync.tooLarge.length > 0 ? tooLargeMessage() : null)
+  if (sync.listenerError) return sync.listenerError
+  if (sync.tooLarge.length > 0) return tooLargeMessage()
+  return Object.keys(sync.rejected).length > 0 ? rejectedMessage() : null
 }
 
 /** Cambia los errores persistentes: se muestra el nuevo, salvo que haya otro error transitorio a la vista. */
@@ -142,7 +153,7 @@ function clearTransientError() {
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error'
 
 export function selectSyncStatus(s: AppState): SyncStatus {
-  if (s.sync.error || s.sync.listenerError || s.sync.tooLarge.length > 0) return 'error'
+  if (s.sync.error || lastingError(s.sync)) return 'error'
   if (!s.sync.online) return 'offline'
   if (s.sync.dirty.length > 0 || s.sync.serverPending || s.sync.fromCache) return 'syncing'
   return 'synced'
@@ -205,10 +216,116 @@ function commit(allOps: WriteOp[]) {
   const ops = allOps.filter((op) => !isStale(op))
   if (!user || !backend || ops.length === 0) return
   applyLocal(ops)
+  const seq = ++writeSeq
   backend.write(user.uid, ops).then(
-    () => clearTransientError(),
-    (error: unknown) => setSync({ error: error instanceof Error ? error.message : String(error) }),
+    () => {
+      clearTransientError()
+      settleRejected(user.uid, ops, seq, null)
+    },
+    (error: unknown) => {
+      const reason = error instanceof Error ? error.message : String(error)
+      setSync({ error: reason })
+      settleRejected(user.uid, ops, seq, reason)
+    },
   )
+}
+
+// ---------- Texto rechazado por la nube ----------
+// Firestore deshace en su caché una escritura que el servidor rechaza (p. ej. sin permiso), también una hecha sin
+// conexión que se envía más tarde. Lo escrito se guarda en el dispositivo, vuelve al editor y se reenvía con la
+// siguiente edición de la nota.
+
+const REJECTED_PREFIX = 'kaze:rejected:'
+
+export interface RejectedVersion {
+  title?: string
+  content?: string
+  reason: string
+  /** Carga de la página y número de la escritura rechazada: solo la deja sin efecto un guardado posterior. */
+  page: string
+  seq: number
+}
+
+let writeSeq = 0
+// Por si el almacenamiento local no está disponible o está lleno.
+const rejectedInMemory = new Map<string, RejectedVersion>()
+
+const rejectedKey = (uid: string, id: string) => `${REJECTED_PREFIX}${uid}:${id}`
+
+function readRejected(uid: string, id: string): RejectedVersion | null {
+  const key = rejectedKey(uid, id)
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw) return JSON.parse(raw) as RejectedVersion
+  } catch {
+    // Ilegible o sin almacenamiento: vale la copia en memoria.
+  }
+  return rejectedInMemory.get(key) ?? null
+}
+
+function writeRejected(uid: string, id: string, version: RejectedVersion | null) {
+  const key = rejectedKey(uid, id)
+  rejectedInMemory.delete(key)
+  try {
+    if (version) localStorage.setItem(key, JSON.stringify(version))
+    else localStorage.removeItem(key)
+  } catch {
+    if (version) rejectedInMemory.set(key, version)
+  }
+  if (get().user?.uid !== uid) return
+  const { [id]: _, ...rest } = get().sync.rejected
+  setLasting({ rejected: version ? { ...rest, [id]: version.seq } : rest })
+}
+
+/** Notas de `uid` con texto rechazado guardado en el dispositivo. */
+function storedRejected(uid: string): Record<string, number> {
+  const prefix = rejectedKey(uid, '')
+  const keys = new Set(rejectedInMemory.keys())
+  try {
+    for (let i = 0; i < localStorage.length; i++) keys.add(localStorage.key(i) ?? '')
+  } catch {
+    // Sin almacenamiento local.
+  }
+  const found: Record<string, number> = {}
+  for (const key of keys) {
+    if (!key.startsWith(prefix)) continue
+    const id = key.slice(prefix.length)
+    const version = readRejected(uid, id)
+    if (version) found[id] = version.seq
+  }
+  return found
+}
+
+/** Texto que guarda una escritura de una nota que ya existía (lo único que se conserva si se rechaza). */
+function textOf(op: WriteOp): Pick<RejectedVersion, 'title' | 'content'> | null {
+  if (op.type !== 'setNote' || 'createdAt' in op.data) return null
+  const { title, content } = op.data
+  if (title === undefined && content === undefined) return null
+  return { ...(title !== undefined && { title }), ...(content !== undefined && { content }) }
+}
+
+/** Tras una escritura: conserva el texto rechazado o, si salió bien, olvida lo rechazado antes. */
+function settleRejected(uid: string, ops: WriteOp[], seq: number, reason: string | null) {
+  for (const op of ops) {
+    const text = textOf(op)
+    if (!text) continue
+    const old = readRejected(uid, op.id)
+    if (reason !== null) writeRejected(uid, op.id, { ...old, ...text, reason, page: deviceId, seq })
+    // Un guardado anterior al rechazado puede confirmarse después: ese no lo deja sin efecto.
+    else if (old && (old.page !== deviceId || old.seq < seq)) writeRejected(uid, op.id, null)
+  }
+}
+
+/** Texto de la nota que la nube rechazó y se conserva en este dispositivo (null si no hay). */
+export function rejectedVersion(id: string): RejectedVersion | null {
+  const uid = get().user?.uid
+  return uid ? readRejected(uid, id) : null
+}
+
+/** Descarta el texto rechazado de una nota: vuelve a valer la versión de la nube. */
+export function discardRejected(id: string) {
+  const uid = get().user?.uid
+  if (uid) writeRejected(uid, id, null)
 }
 
 // ---------- Suscripción a datos ----------
@@ -247,6 +364,8 @@ function keepOverwritten(prev: Record<string, Note>, list: Note[]) {
   for (const note of list) {
     const old = prev[note.id]
     if (!old || !note.device || note.device === deviceId || note.baseRev === undefined) continue
+    // La nube deshizo un cambio rechazado de aquí: no es otra versión, y lo escrito ya se conserva aparte.
+    if (get().sync.rejected[note.id] !== undefined) continue
     // El mismo dispositivo sustituye su propia versión (o la marca no cambió: versión antigua de la app o
     // cambio solo de metadatos).
     if (note.device === old.device) continue
@@ -334,7 +453,11 @@ export function initApp() {
       notes: {},
       folders: {},
       unlockedNoteId: null,
-      sync: { ...s.sync, error: null, listenerError: null, tooLarge: [] },
+      sync: (() => {
+        const rejected = user ? storedRejected(user.uid) : {}
+        const error = Object.keys(rejected).length > 0 ? rejectedMessage() : null
+        return { ...s.sync, error, listenerError: null, tooLarge: [], rejected }
+      })(),
     }))
     if (!user) return
 

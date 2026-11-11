@@ -44,6 +44,7 @@ import {
   createNote,
   deleteAttachmentFile,
   deleteNoteForever,
+  discardRejected,
   emptyTrash,
   initApp,
   isPermanentUploadError,
@@ -52,6 +53,7 @@ import {
   QUEUED_UPLOAD_KEY,
   referencedPaths,
   registerFlush,
+  rejectedVersion,
   renameFolder,
   selectSyncStatus,
   setColor,
@@ -113,8 +115,11 @@ beforeEach(() => {
     notes: {},
     folders: {},
     view: { kind: 'notes', folderId: null },
-    sync: { online: true, serverPending: false, fromCache: false, dirty: [], error: null, listenerError: null, tooLarge: [] },
+    sync: { online: true, serverPending: false, fromCache: false, dirty: [], error: null, listenerError: null, tooLarge: [], rejected: {} },
   })
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith('kaze:rejected:'))
+    .forEach((key) => localStorage.removeItem(key))
 })
 
 afterEach(() => vi.useRealTimers())
@@ -578,5 +583,77 @@ describe('attachment uploads', () => {
     expect(selectSyncStatus(useApp.getState())).toBe('syncing')
     useApp.setState((s) => ({ sync: { ...s.sync, online: false } }))
     expect(selectSyncStatus(useApp.getState())).toBe('offline')
+  })
+})
+
+describe('text the cloud rejects', () => {
+  const denied = () => new Error('Missing or insufficient permissions.')
+  const deferred = () => {
+    let resolve!: () => void
+    const promise = new Promise<undefined>((r) => (resolve = () => r(undefined)))
+    return { promise, resolve }
+  }
+
+  it('keeps the rejected text on the device, marks the note and shows an error', async () => {
+    setNotes(note('n1', { content: doc(text('a')) }))
+    fake.backend.write.mockRejectedValueOnce(denied())
+    updateNote('n1', { title: 'Plan', content: doc(text('b')) })
+    await settle()
+    expect(rejectedVersion('n1')).toMatchObject({ title: 'Plan', content: doc(text('b')), reason: denied().message })
+    expect(useApp.getState().sync.rejected).toHaveProperty('n1')
+    expect(selectSyncStatus(useApp.getState())).toBe('error')
+  })
+
+  it('a later save of the note clears it, but an earlier save confirmed after the rejection does not', async () => {
+    setNotes(note('n1'))
+    const earlier = deferred()
+    fake.backend.write.mockImplementationOnce(() => earlier.promise)
+    fake.backend.write.mockRejectedValueOnce(denied())
+    updateNote('n1', { content: doc(text('b')) })
+    updateNote('n1', { content: doc(text('c')) })
+    await settle()
+    earlier.resolve()
+    await settle()
+    expect(rejectedVersion('n1')?.content).toBe(doc(text('c')))
+
+    updateNote('n1', { content: doc(text('d')) })
+    await settle()
+    expect(rejectedVersion('n1')).toBeNull()
+    expect(useApp.getState().sync.rejected).toEqual({})
+    expect(useApp.getState().sync.error).toBeNull()
+  })
+
+  it('is still there after signing in again (e.g. a reload), and discarding it forgets it', async () => {
+    setNotes(note('n1'))
+    fake.backend.write.mockRejectedValueOnce(denied())
+    updateNote('n1', { content: doc(text('b')) })
+    await settle()
+    fake.state.auth?.(null)
+    fake.state.auth?.(user)
+    expect(useApp.getState().sync.rejected).toHaveProperty('n1')
+    expect(selectSyncStatus(useApp.getState())).toBe('error')
+    discardRejected('n1')
+    expect(rejectedVersion('n1')).toBeNull()
+    expect(useApp.getState().sync.rejected).toEqual({})
+  })
+
+  it('keeps nothing for rejected changes that carry no text (pin, color)', async () => {
+    setNotes(note('n1'))
+    fake.backend.write.mockRejectedValueOnce(denied())
+    setPinned('n1', true)
+    await settle()
+    expect(useApp.getState().sync.rejected).toEqual({})
+  })
+
+  it('the cloud undoing a rejected change is not taken for another device overwriting it', async () => {
+    setNotes(note('n1', { rev: 5, device: 'other-device' }))
+    fake.backend.write.mockRejectedValueOnce(denied())
+    updateNote('n1', { content: doc(text('b')) })
+    await settle()
+    fake.backend.write.mockClear()
+    // Vuelve la versión del servidor, de otro dispositivo y con una base anterior a la de aquí.
+    lastHandlers().notes([note('n1', { rev: 5, baseRev: 3, device: 'other-device' })], meta)
+    await settle()
+    expect(writtenOps()).toEqual([])
   })
 })

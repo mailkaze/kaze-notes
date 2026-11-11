@@ -214,6 +214,77 @@ test('an edit from another device that started from the last version saved here 
   expect((await storedNotes(page)).map((n) => n.title)).toEqual(['Plan'])
 })
 
+/**
+ * La nube rechaza los guardados de texto que contienen `marker`, como hace Firestore: la caché vuelve primero a la
+ * versión del servidor (llega como un snapshot) y después falla la escritura. Devuelve cómo volver a aceptarlos.
+ */
+async function rejectTextWith(page: Page, marker: string) {
+  await page.evaluate(async (marker) => {
+    const url = '/src/lib/backend/index.ts'
+    const { backend } = await import(/* @vite-ignore */ url)
+    const write = backend.write.bind(backend)
+    type Op = { type: string; data?: { title?: unknown; content?: unknown } }
+    backend.write = (uid: string, ops: Op[]) => {
+      const refused = ops.some(
+        (op) => op.type === 'setNote' && [op.data?.title, op.data?.content].some((v) => typeof v === 'string' && v.includes(marker)),
+      )
+      if (!refused) return write(uid, ops)
+      // La respuesta del servidor tarda: el cambio local llega a verse antes de deshacerse.
+      return new Promise((_, reject) =>
+        setTimeout(() => {
+          void write(uid, [])
+          setTimeout(() => reject(Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' })), 50)
+        }, 200),
+      )
+    }
+  }, marker)
+}
+
+const rejectedNotice = (page: Page) => page.getByRole('alert').filter({ hasText: 'no ha aceptado' })
+
+test('a change the cloud rejects stays in the editor and on the device, and is sent again with the next edit', async ({ page }) => {
+  await newNote(page, 'Presupuesto', 'base')
+  await expect.poll(async () => (await storedNote(page, 'Presupuesto'))?.content ?? '').toContain('base')
+  await rejectTextWith(page, 'RECHAZO')
+
+  await page.keyboard.type(' RECHAZO uno')
+  // Pasa el guardado (600 ms) y vuelve la versión del servidor: lo escrito sigue en el editor.
+  await page.waitForTimeout(1500)
+  await expect(page.locator('.ProseMirror')).toContainText('base RECHAZO uno')
+  await expect(rejectedNotice(page)).toBeVisible()
+  expect((await storedNote(page, 'Presupuesto'))?.content).not.toContain('RECHAZO')
+
+  // Tras recargar (la nube vuelve a aceptar), la nota abre con lo rechazado y se reenvía al seguir escribiendo.
+  await page.reload()
+  await page.getByTestId('note-card').filter({ hasText: 'Presupuesto' }).click()
+  await expect(page.locator('.ProseMirror')).toContainText('base RECHAZO uno')
+  await expect(rejectedNotice(page)).toBeVisible()
+  await page.locator('.ProseMirror').click()
+  await page.keyboard.press(`${mod}+End`)
+  await page.keyboard.type(' dos')
+  await expect.poll(async () => (await storedNote(page, 'Presupuesto'))?.content ?? '').toContain('base RECHAZO uno dos')
+  await expect(rejectedNotice(page)).toHaveCount(0)
+  // No es un conflicto con otro dispositivo: no hay copia.
+  expect((await storedNotes(page)).map((n) => n.title)).toEqual(['Presupuesto'])
+})
+
+test('discarding a rejected change shows the cloud version again', async ({ page }) => {
+  await newNote(page, 'Lista', 'leche')
+  await expect.poll(async () => (await storedNote(page, 'Lista'))?.content ?? '').toContain('leche')
+  await rejectTextWith(page, 'RECHAZO')
+  await page.keyboard.type(' RECHAZO')
+  await expect(rejectedNotice(page)).toBeVisible()
+
+  await rejectedNotice(page).getByRole('button', { name: 'Descartar' }).click()
+  await expect(rejectedNotice(page)).toHaveCount(0)
+  await expect(page.locator('.ProseMirror')).toHaveText('leche')
+  await backToNotes(page)
+  await page.reload()
+  await page.getByTestId('note-card').filter({ hasText: 'Lista' }).click()
+  await expect(page.locator('.ProseMirror')).toHaveText('leche')
+  await expect(rejectedNotice(page)).toHaveCount(0)
+})
+
 // Las subidas ya no preguntan al cerrar: el fichero queda guardado en el dispositivo (e2e/attachments-offline.spec.ts).
 test('closing the tab with pending text does not ask, and the text is saved', async ({ page }) => {
   await newNote(page, 'Planos', 'casa ')
