@@ -533,9 +533,12 @@ export async function hasUnsyncedChanges(): Promise<boolean> {
   if (!user || !backend) return false
   const synced = await backend.waitForSync(SIGN_OUT_WAIT_MS)
   const queued = await pendingUploadCount(user.uid).catch(() => 0)
-  // Lo rechazado se lee del dispositivo: puede haberlo guardado otra pestaña.
-  const rejected = Object.keys(storedRejected(user.uid)).length
-  return !synced || queued > 0 || rejected > 0 || get().sync.dirty.some((key) => key.startsWith(UPLOAD_KEY))
+  const { sync } = get()
+  // Lo rechazado puede estar guardado por otra pestaña, o solo en la memoria de esta si no cupo en el dispositivo.
+  const rejected = Object.keys({ ...storedRejected(user.uid), ...sync.rejected }).length
+  // Una nota demasiado grande tiene en el editor cambios que nunca se guardaron.
+  const notSaved = sync.tooLarge.length + sync.dirty.filter((key) => key.startsWith(UPLOAD_KEY)).length
+  return !synced || queued > 0 || rejected > 0 || notSaved > 0
 }
 
 /** Cierra la sesión y borra de este dispositivo los datos de la cuenta; las preferencias de la interfaz se quedan. */

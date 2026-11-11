@@ -678,3 +678,12 @@ describe('signing out with text rejected in another tab', () => {
     expect(await hasUnsyncedChanges()).toBe(true)
   })
 })
+
+describe('signing out with changes kept only in this tab', () => {
+  it('counts rejected text that could only be kept in memory, and notes too large to save', async () => {
+    useApp.setState((s) => ({ sync: { ...s.sync, rejected: { n1: 1 } } }))
+    expect(await hasUnsyncedChanges()).toBe(true)
+    useApp.setState((s) => ({ sync: { ...s.sync, rejected: {}, tooLarge: ['n2'] } }))
+    expect(await hasUnsyncedChanges()).toBe(true)
+  })
+})
