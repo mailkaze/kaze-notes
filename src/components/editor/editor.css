@@ -237,21 +237,6 @@
   .note-more {
     display: inline-flex !important;
   }
-
-  .note-header .sync-indicator {
-    width: 28px;
-    padding: 0;
-    justify-content: center;
-  }
-
-  .note-header .sync-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
 }
 
 /* ---------- Colores ---------- */
@@ -378,7 +363,7 @@
   flex: 1;
   min-height: 6em;
   outline: none;
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1.6;
   overflow-wrap: anywhere;
   caret-color: var(--accent);
@@ -465,13 +450,15 @@
   min-width: 0;
 }
 
-/* Casilla propia: cuadrado redondeado que se rellena con un degradado y una marca animada. */
+/* Casilla propia: cuadrado de esquinas redondeadas que se rellena con el color de acento y una marca de trazo
+   redondeado. */
 .note-body {
-  --check-bg: linear-gradient(145deg, color-mix(in srgb, var(--accent) 72%, #fff), var(--accent));
-  --check-border: color-mix(in srgb, var(--text-muted) 60%, transparent);
-  --check-ring: color-mix(in srgb, var(--accent) 18%, transparent);
+  --check-bg: var(--accent);
+  --check-border: color-mix(in srgb, var(--text-muted) 55%, transparent);
+  --check-ring: color-mix(in srgb, var(--accent) 16%, transparent);
   --check-mark: #fff;
-  --check-box: var(--surface);
+  --check-box: transparent;
+  --check-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .note-editor[data-colored='true'] .note-body {
@@ -479,7 +466,8 @@
   --check-border: color-mix(in srgb, var(--note-text) 45%, transparent);
   --check-ring: color-mix(in srgb, var(--note-text) 14%, transparent);
   --check-mark: var(--bg);
-  --check-box: color-mix(in srgb, #fff 35%, transparent);
+  --check-box: color-mix(in srgb, #fff 30%, transparent);
+  --check-shadow: none;
 }
 
 .note-body ul[data-type='taskList'] > li input[type='checkbox'] {
@@ -488,31 +476,36 @@
   display: grid;
   place-content: center;
   flex: none;
-  width: 1.1em;
-  height: 1.1em;
+  width: 1.3em;
+  height: 1.3em;
   margin: 0;
-  border: 2px solid var(--check-border);
-  border-radius: 0.34em;
-  background: var(--check-box);
+  border: 2.5px solid var(--check-border);
+  border-radius: 0.3em;
+  background-color: var(--check-box);
   cursor: pointer;
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    transform 0.12s ease;
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.15s ease;
 }
 
 .note-body ul[data-type='taskList'] > li input[type='checkbox']::before {
   content: '';
-  width: 0.62em;
-  height: 0.62em;
+  width: 0.8em;
+  height: 0.8em;
   background: var(--check-mark);
-  clip-path: polygon(12% 50%, 0 66%, 38% 100%, 100% 24%, 86% 10%, 38% 70%);
-  transform: scale(0);
-  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  -webkit-mask: var(--check-icon) center / contain no-repeat;
+  mask: var(--check-icon) center / contain no-repeat;
+  opacity: 0;
+  transform: scale(0.3);
+  transition:
+    transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
+    opacity 0.15s ease;
 }
 
 .note-body ul[data-type='taskList'] > li input[type='checkbox']:hover {
-  border-color: color-mix(in srgb, var(--check-border) 30%, var(--accent));
+  border-color: color-mix(in srgb, var(--check-border) 25%, var(--accent));
   box-shadow: 0 0 0 4px var(--check-ring);
 }
 
@@ -521,7 +514,7 @@
 }
 
 .note-body ul[data-type='taskList'] > li input[type='checkbox']:active {
-  transform: scale(0.88);
+  transform: scale(0.9);
 }
 
 .note-body ul[data-type='taskList'] > li input[type='checkbox']:focus-visible {
@@ -530,10 +523,12 @@
 
 .note-body ul[data-type='taskList'] > li input[type='checkbox']:checked {
   border-color: transparent;
-  background: var(--check-bg);
+  background-color: var(--check-bg);
+  box-shadow: var(--check-shadow);
 }
 
 .note-body ul[data-type='taskList'] > li input[type='checkbox']:checked::before {
+  opacity: 1;
   transform: scale(1);
 }
 

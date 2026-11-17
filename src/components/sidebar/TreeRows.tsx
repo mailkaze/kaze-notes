@@ -19,6 +19,7 @@ import { confirmDialog } from '../ui/confirm'
 import { Popover } from '../ui/Popover'
 import { justDragged } from './dnd'
 import { useExternalDrop } from './externalDrop'
+import { previewContent } from '../ui/previewContent'
 import { previewLines, useTree, type DropState } from './treeContext'
 import type { DragItem, DropTarget } from './treeDrop'
 
@@ -99,7 +100,7 @@ export function NoteRow({
             {t('Protected', 'Protegida')}
           </span>
         ) : lines ? (
-          <span className="tree-note-preview">{lines}</span>
+          <span className="tree-note-preview">{previewContent(lines)}</span>
         ) : (
           !title && <span className="tree-note-empty">{t('Empty note', 'Nota vacía')}</span>
         )}

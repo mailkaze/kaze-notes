@@ -34,8 +34,8 @@ const LABELS: Record<Shown, { label: string; hint: string }> = {
   },
 }
 
-/** Estado de sincronización siempre visible. `compact` muestra solo el icono. */
-export function SyncIndicator({ compact = false }: { compact?: boolean }) {
+/** Estado de sincronización siempre visible: solo el icono y el color (el texto, para lectores de pantalla). */
+export function SyncIndicator() {
   const status = useApp(selectSyncStatus)
   const error = useApp((s) => s.sync.error)
   const [stalled, setStalled] = useState(false)
@@ -54,15 +54,15 @@ export function SyncIndicator({ compact = false }: { compact?: boolean }) {
 
   return (
     <span
-      className={`sync-indicator sync-${shown}${compact ? ' sync-compact' : ''}`}
+      className={`sync-indicator sync-${shown}`}
       role="status"
       aria-live="polite"
       title={title}
       data-testid="sync-indicator"
       data-status={shown}
     >
-      <Icon size={17} strokeWidth={2.2} className={shown === 'syncing' ? 'spin' : undefined} aria-hidden />
-      <span className={compact ? 'visually-hidden' : 'sync-label'}>{label}</span>
+      <Icon size={18} strokeWidth={2.2} className={shown === 'syncing' ? 'spin' : undefined} aria-hidden />
+      <span className="visually-hidden">{label}</span>
     </span>
   )
 }

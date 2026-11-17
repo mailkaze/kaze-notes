@@ -16,7 +16,6 @@ import { useSidebarDrop } from '../sidebar/externalDrop'
 import { DragPreview } from '../sidebar/TreeRows'
 import { NoteCard, SortableNoteCard } from './NoteCard'
 import { reorderKey, splitPinned } from './noteSections'
-import { useNarrow } from './useNarrow'
 import './notes.css'
 
 /** Título con la ruta de la carpeta; cada carpeta antecesora es un enlace. */
@@ -251,7 +250,6 @@ export function NotesScreen({ folderId }: { folderId: string | null }) {
   const folders = useApp((s) => s.folders)
   const layout = useApp((s) => s.layout)
   const dataReady = useApp((s) => s.dataReady)
-  const narrow = useNarrow()
   const folderMissing = Boolean(folderId && !folders[folderId])
 
   // Si la carpeta desaparece (borrada en otro dispositivo), se vuelve a "Todas las notas".
@@ -369,7 +367,7 @@ export function NotesScreen({ folderId }: { folderId: string | null }) {
             <SquarePen size={21} />
           </button>
           <InvitesBell />
-          <SyncIndicator compact={narrow} />
+          <SyncIndicator />
         </div>
       </header>
       <div

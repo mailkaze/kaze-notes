@@ -10,7 +10,7 @@ import { SidebarToggle } from '../ui/controls'
 import { InvitesBell } from '../ui/InvitesBell'
 import { SyncIndicator } from '../ui/SyncIndicator'
 import { previewLines } from '../sidebar/treeContext'
-import { useNarrow } from './useNarrow'
+import { previewContent } from '../ui/previewContent'
 import './notes.css'
 
 const LOCALE = isSpanish ? 'es' : 'en'
@@ -59,7 +59,7 @@ function TrashItem({ note }: { note: Note }) {
             {t('Protected', 'Protegida')}
           </span>
         ) : lines ? (
-          <span className="trash-preview">{lines}</span>
+          <span className="trash-preview">{previewContent(lines)}</span>
         ) : (
           !title && <span className="trash-empty-note">{t('Empty note', 'Nota vacía')}</span>
         )}
@@ -102,7 +102,6 @@ function TrashItem({ note }: { note: Note }) {
 export function TrashScreen() {
   const notes = useApp((s) => s.notes)
   const trashed = useMemo(() => trashedNotes(notes), [notes])
-  const narrow = useNarrow()
 
   const onEmpty = async () => {
     const count = trashed.length
@@ -138,7 +137,7 @@ export function TrashScreen() {
           <span className="trash-btn-label">{t('Empty trash', 'Vaciar papelera')}</span>
         </button>
         <InvitesBell />
-        <SyncIndicator compact={narrow} />
+        <SyncIndicator />
       </header>
       <div className="screen-body">
         {trashed.length === 0 ? (

@@ -8,6 +8,7 @@ import { t } from '../../lib/i18n'
 import type { LayoutMode, Note } from '../../lib/types'
 import { openNote, setPinned } from '../../state/store'
 import { justDragged } from '../sidebar/dnd'
+import { previewContent } from '../ui/previewContent'
 
 interface NoteCardProps {
   note: Note
@@ -52,7 +53,7 @@ export function NoteCard({ note, layout, path, overlay, dragging, ref, style, dr
             {t('Protected', 'Protegida')}
           </span>
         ) : preview ? (
-          <span className="note-card-preview">{preview}</span>
+          <span className="note-card-preview">{previewContent(preview)}</span>
         ) : (
           !title && <span className="note-card-empty">{t('Empty note', 'Nota vacía')}</span>
         )}
