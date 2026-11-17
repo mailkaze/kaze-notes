@@ -115,6 +115,39 @@ describe('WhatsApp typing rules', () => {
   })
 })
 
+const taskList = (...items: string[]) =>
+  `<ul data-type="taskList">${items.map((i) => `<li data-type="taskItem" data-checked="false"><p>${i}</p></li>`).join('')}</ul>`
+
+/** Estructura de primer nivel: cada lista de casillas como el texto de sus elementos, el resto por tipo. */
+function blocks(editor: Editor) {
+  return editor.state.doc.children.map((n) =>
+    n.type.name === 'taskList' ? n.children.map((i) => i.textContent) : n.type.name,
+  )
+}
+
+describe('checklists', () => {
+  it('typing [ ] right below a checklist adds the new item to that same list', () => {
+    const editor = makeEditor(`${taskList('a', 'b')}<p></p>`, true)
+    editor.commands.focus('end')
+    type(editor, '[ ] c')
+    expect(blocks(editor)).toEqual([['a', 'b', 'c'], 'paragraph'])
+  })
+
+  it('a note saved with two checklists one after the other opens as a single list, without saving', async () => {
+    let updates = 0
+    const editor = new Editor({
+      element: document.createElement('div'),
+      extensions: createExtensions(),
+      content: `${taskList('a')}${taskList('b', 'c')}<p>x</p>${taskList('d')}<p>y</p>`,
+      onUpdate: () => updates++,
+    })
+    editors.push(editor)
+    await new Promise((resolve) => setTimeout(resolve))
+    expect(blocks(editor)).toEqual([['a', 'b', 'c'], 'paragraph', ['d'], 'paragraph'])
+    expect(updates).toBe(0)
+  })
+})
+
 describe('toolbar commands', () => {
   it('with an empty selection, a format applies to the next typed text', () => {
     const editor = makeEditor('<p>a</p>', true)

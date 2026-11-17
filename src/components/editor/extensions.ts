@@ -4,7 +4,7 @@ import Italic from '@tiptap/extension-italic'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import Strike from '@tiptap/extension-strike'
 import { Placeholder } from '@tiptap/extensions'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Plugin, PluginKey, type Transaction } from '@tiptap/pm/state'
 import type { Slice } from '@tiptap/pm/model'
 import type { EditorView } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
@@ -75,6 +75,42 @@ function syntheticPasteEvent(): ClipboardEvent {
   return typeof ClipboardEvent === 'function' ? new ClipboardEvent('paste') : (new Event('paste') as ClipboardEvent)
 }
 
+/** Une las listas de casillas contiguas, o null si no hay ninguna que unir. */
+function joinTaskLists(tr: Transaction): Transaction | null {
+  const joins: number[] = []
+  tr.doc.descendants((node, pos, parent, index) => {
+    if (node.isTextblock) return false
+    if (node.type.name === 'taskList' && index > 0 && parent?.child(index - 1).type === node.type) joins.push(pos)
+  })
+  if (!joins.length) return null
+  // De atrás adelante: cada unión solo desplaza las posiciones posteriores.
+  for (let i = joins.length - 1; i >= 0; i--) tr.join(joins[i])
+  return tr
+}
+
+/**
+ * Dos listas de casillas seguidas se ven como una sola, así que se mantienen unidas (p. ej. tras escribir `[ ] `
+ * bajo una lista); si no, al reordenar un elemento no podría pasar a la otra.
+ */
+const JoinedTaskList = TaskList.extend({
+  addProseMirrorPlugins() {
+    return [
+      ...(this.parent?.() ?? []),
+      new Plugin({
+        key: new PluginKey('joinTaskLists'),
+        appendTransaction: (transactions, _old, state) =>
+          transactions.some((tr) => tr.docChanged) ? joinTaskLists(state.tr) : null,
+      }),
+    ]
+  },
+
+  // Notas guardadas con listas ya partidas: se unen al abrir, sin entrar en el historial ni provocar un guardado.
+  onCreate() {
+    const tr = joinTaskLists(this.editor.state.tr)
+    if (tr) this.editor.view.dispatch(tr.setMeta('addToHistory', false).setMeta('preventUpdate', true))
+  },
+})
+
 /** Copiar en formato WhatsApp y pegar texto de WhatsApp conservando formatos, viñetas y casillas. */
 const WhatsAppClipboard = Extension.create({
   name: 'whatsAppClipboard',
@@ -131,7 +167,7 @@ export function createExtensions({ emoji, reorderableTasks = false }: EditorExte
     WhatsAppBold,
     WhatsAppItalic,
     WhatsAppStrike,
-    TaskList,
+    JoinedTaskList,
     (reorderableTasks ? ReorderableTaskItem : TaskItem).configure({
       nested: true,
       a11y: {

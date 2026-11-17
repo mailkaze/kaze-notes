@@ -218,6 +218,34 @@ test('checkboxes interleave with text and reorder by dragging the grip (S5)', as
   await expect(items.nth(1).locator('p')).toHaveText('uno')
 })
 
+test('a checkbox typed with [ ] below a list joins it and can be dragged to its top', async ({ page }) => {
+  await newNote(page, 'Compra')
+  await page.locator('.ProseMirror').click()
+  await page.getByRole('button', { name: 'Casilla de verificación' }).click()
+  for (const item of ['uno', 'dos', 'tres']) {
+    await page.keyboard.type(item)
+    await page.keyboard.press('Enter')
+  }
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('[ ] cuatro')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('cinco')
+  await expect(page.locator('.ProseMirror ul[data-type="taskList"]')).toHaveCount(1)
+
+  const items = page.locator('.ProseMirror ul[data-type="taskList"] > li')
+  const grip = items.nth(4).locator('.task-grip')
+  await items.nth(4).hover()
+  const from = await grip.boundingBox()
+  const to = await items.nth(0).boundingBox()
+  if (!from || !to) throw new Error('missing boxes')
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(from.x + from.width / 2, to.y + 2, { steps: 12 })
+  await page.mouse.up()
+  await expect(items.nth(0).locator('p')).toHaveText('cinco')
+  await expect(items.nth(1).locator('p')).toHaveText('uno')
+})
+
 test('typed and pasted links become plain links (S15)', async ({ page }) => {
   await newNote(page, '', 'Mira https://example.com ')
   const link = page.locator('.ProseMirror a[href="https://example.com"]')
